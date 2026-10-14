@@ -1,20 +1,31 @@
 // Tiszta függvények: a push parancs értelmezése és a kiszivárgó adatok keresése a pusholt változásokban.
 
-export type Push = { dir: string | null; remote: string; src: string; dst: string | null }
+export type Ref = { src: string; dst: string | null }
+// remote: null = a git saját alapértelmezése (pushRemote / pushDefault / upstream / origin).
+// all: --all, --mirror, --tags és glob refspec: minden helyi ág és tag megy.
+export type Push = { dir: string | null; remote: string | null; refs: Ref[]; all: boolean }
 
-const FLAGS_WITH_VALUE = new Set(['--repo', '--receive-pack', '--exec', '-o', '--push-option', '--signed', '--recurse-submodules'])
+const FLAGS_WITH_VALUE = new Set(['--receive-pack', '--exec', '-o', '--push-option'])
+const ALL_FLAGS = new Set(['--all', '--mirror', '--branches', '--tags', '--follow-tags'])
 
 function words(segment: string): string[] {
   return [...segment.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3] ?? '')
 }
 
-// `cd x && git push origin a:b`, `git -C x push -u origin main` → mit pusholunk, hova.
-export function parsePush(command: string): Push | null {
+// Az átirányítások (`2>&1`, `> log`, `&>x`, `< in`) nem argumentumok: kivesszük őket, mielőtt a parancsot szakaszokra bontjuk.
+function withoutRedirects(command: string): string {
+  return command.replace(/\d*>&\d+|&>>?\s*[^\s;&|()]+|\d*>>?\s*[^\s;&|()]+|\d*<\s*[^\s;&|()]+/g, ' ')
+}
+
+// `cd x && git push origin a:b`, `git -C x push -u origin main`, `git push 2>&1 | tail` → mit pusholunk, hova.
+// Minden push-t visszaad egy összetett parancsból; a dry-run és a törlés nem visz ki tartalmat.
+export function parsePushes(command: string): Push[] {
+  const pushes: Push[] = []
   let dir: string | null = null
-  for (const segment of command.split(/&&|\|\||;|\n/)) {
+  for (const segment of withoutRedirects(command).split(/&&|\|\||[;|&\n()]/)) {
     const w = words(segment.trim())
     if (w[0] === 'cd' && w[1] !== undefined) dir = w[1]
-    const g = w.indexOf('git')
+    const g = w.findIndex(x => /(^|\/)git$/.test(x))
     if (g === -1) continue
     let i = g + 1
     let gitDir = dir
@@ -27,35 +38,88 @@ export function parsePush(command: string): Push | null {
     }
     if (w[i] !== 'push') continue
     const positional: string[] = []
+    let remote: string | null = null
     let dryRun = false
     let deleting = false
+    let all = false
     for (let j = i + 1; j < w.length; j++) {
       const a = w[j] ?? ''
       if (a === '--dry-run' || a === '-n') dryRun = true
       else if (a === '--delete' || a === '-d') deleting = true
+      else if (ALL_FLAGS.has(a)) all = true
+      else if (a === '--repo') remote = w[++j] ?? null
+      else if (a.startsWith('--repo=')) remote = a.slice('--repo='.length)
       else if (FLAGS_WITH_VALUE.has(a)) j++
       else if (!a.startsWith('-')) positional.push(a)
     }
-    if (dryRun || deleting) return null
-    const remote = positional[0] ?? 'origin'
-    const spec = (positional[1] ?? '').replace(/^\+/, '')
-    if (spec.startsWith(':')) return null
-    const colon = spec.indexOf(':')
-    const src = colon === -1 ? spec : spec.slice(0, colon)
-    const dst = colon === -1 ? '' : spec.slice(colon + 1)
-    return { dir: gitDir, remote, src: src === '' ? 'HEAD' : src, dst: dst === '' ? null : dst.replace(/^refs\/heads\//, '') }
+    if (dryRun || deleting) continue
+    if (positional[0] !== undefined) remote = positional[0]
+    const refs: Ref[] = []
+    for (const raw of positional.slice(1)) {
+      const spec = raw.replace(/^\+/, '')
+      if (spec.startsWith(':')) continue
+      if (spec.includes('*')) {
+        all = true
+        continue
+      }
+      const colon = spec.indexOf(':')
+      const src = colon === -1 ? spec : spec.slice(0, colon)
+      const dst = colon === -1 ? '' : spec.slice(colon + 1)
+      refs.push({ src: src === '' ? 'HEAD' : src, dst: dst === '' ? null : dst.replace(/^refs\/heads\//, '') })
+    }
+    // Csak törlő refspecek (`git push origin :old`): nem megy ki tartalom.
+    if (!all && refs.length === 0 && positional.length > 1) continue
+    if (!all && refs.length === 0) refs.push({ src: 'HEAD', dst: null })
+    pushes.push({ dir: gitDir, remote, refs, all })
+  }
+  return pushes
+}
+
+export function parsePush(command: string): Push | null {
+  return parsePushes(command)[0] ?? null
+}
+
+// `gh repo edit --visibility public`, `gh repo create --public`, `gh api ... private=false`: a repó egésze nyilvános lesz.
+export type GoingPublic = { repo: string | null; source: string | null; create: boolean }
+
+export function publicTarget(command: string): GoingPublic | null {
+  for (const segment of withoutRedirects(command).split(/&&|\|\||[;|&\n()]/)) {
+    const w = words(segment.trim())
+    const g = w.indexOf('gh')
+    if (g === -1) continue
+    const rest = w.slice(g + 1)
+    const flag = (name: string) => {
+      const k = rest.findIndex(a => a === name || a.startsWith(`${name}=`))
+      if (k === -1) return null
+      const a = rest[k] ?? ''
+      return a.includes('=') ? a.slice(a.indexOf('=') + 1) : (rest[k + 1] ?? '')
+    }
+    const named = rest[2] !== undefined && !rest[2].startsWith('-') ? rest[2] : null
+    if (rest[0] === 'repo' && rest[1] === 'edit' && flag('--visibility')?.toLowerCase() === 'public') {
+      return { repo: named, source: null, create: false }
+    }
+    if (rest[0] === 'repo' && rest[1] === 'create' && rest.includes('--public')) {
+      return { repo: named, source: rest.includes('--push') ? (flag('--source') ?? '.') : null, create: true }
+    }
+    if (rest[0] === 'api') {
+      const path = rest.slice(1).find(a => /^\/?repos\/[\w.-]+\/[\w.-]+\/?$/.test(a))
+      const fields = rest.join(' ')
+      if (path !== undefined && /(?:^|\s)(?:-f|-F|--field|--raw-field)[=\s]*(?:private=false|visibility=public)\b/.test(fields)) {
+        return { repo: path.replace(/^\/?repos\//, '').replace(/\/$/, ''), source: null, create: false }
+      }
+    }
   }
   return null
 }
 
-// `gh repo edit --visibility public` és `gh repo create --public`: az egész fát nézzük át.
 export function goesPublic(command: string): boolean {
-  return /\bgh\s+repo\s+edit\b[^;&|]*--visibility[=\s]+public\b/.test(command) || /\bgh\s+repo\s+create\b[^;&|]*--public\b/.test(command)
+  return publicTarget(command) !== null
 }
 
-// git@github.com:owner/name.git, https://github.com/owner/name → owner/name
+// git@github.com:owner/name.git, https://github.com/owner/name, ssh://git@github.com:22/owner/name,
+// git@github-work:owner/name (SSH host alias) → owner/name
 export function githubRepo(url: string): string | null {
-  const m = /github\.com[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url.trim())
+  const m = /(?:github\.com|@github[\w.-]*)(?::\d+)?[:/]+([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url.trim())
   return m === null ? null : `${m[1]}/${m[2]}`
 }
 
@@ -116,7 +180,12 @@ export function grepLines(output: string, rev: string | null): Line[] {
 }
 
 // Az előszűrő a `git grep`-hez: csak a gyanús sorokat kérjük le.
-export const PREFILTER = 'supabase|project[_ -]?(id|ref)|eyJ|sk_|sk-|rk_live|whsec_|wsec_|gh[pousr]_|AKIA|AIza|PRIVATE KEY|xox[baprs]-|re_[A-Za-z0-9]|@|/Users/|/home/'
+export const PREFILTER = 'supabase|project[_ -]?(id|ref)|eyJ|sk_|sk-|rk_live|whsec_|wsec_|gh[pousr]_|github_pat_|AKIA|AIza|PRIVATE KEY|xox[baprs]-|re_[A-Za-z0-9]|[0-9]:AA|@|/Users/|/home/'
+
+// Az előszűrő a saját home mappával kiegészítve (pl. /root vagy /srv/me sem marad ki).
+export function prefilter(home: string | null): string {
+  return home === null || home === '' ? PREFILTER : `${PREFILTER}|${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
+}
 
 type Rule = { kind: string; re: RegExp; mask: boolean }
 
@@ -135,7 +204,7 @@ const RULES: Rule[] = [
   { kind: 'email', re: /\b([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b/g, mask: false },
 ]
 
-const HARMLESS_EMAIL = /noreply|no-reply|@users\.noreply\.github\.com$|^(git|you|user|name|someone|test|info|email|valaki|pelda)@|@(example|pelda|email|test|domain|ceg|company|something|your-?domain|acme)\.[a-z.]+$/i
+const HARMLESS_EMAIL = /noreply|no-reply|@users\.noreply\.github\.com$|^(git|you|user|name|someone|test|email|valaki|pelda)@|@(example|pelda|email|test|domain|ceg|company|something|your-?domain|acme)\.[a-z.]+$|@\d(?:\.\d)?x\.(?:png|jpe?g|gif|webp|avif|svg)$/i
 // Zajos, generált fájlok: ezekben nem keresünk.
 const SKIP_FILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|composer\.lock)$/
 

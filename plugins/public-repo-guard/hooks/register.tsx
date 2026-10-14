@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { PREFILTER, addedLines, envFiles, githubRepo, goesPublic, grepLines, parsePush, scanLines } from './scan'
+import { addedLines, envFiles, githubRepo, grepLines, parsePushes, prefilter, publicTarget, scanLines } from './scan'
 import type { Finding, Line } from './scan'
 
 const isOn = atom({ plugin: 'public-repo-guard', key: 'isOn' } as const, true)
@@ -19,6 +19,8 @@ const KINDS = {
     privateRepo: 'privát repó neve',
     watched: 'figyelt szöveg',
     envFile: '.env fájl',
+    historyUnchecked: 'túl nagy history, csak a mostani fájlokat néztem át',
+    unchecked: 'más repót tennél nyilvánossá, a tartalmát innen nem látom',
   },
   en: {
     supabaseRef: 'Supabase project ID',
@@ -30,6 +32,8 @@ const KINDS = {
     privateRepo: 'private repo name',
     watched: 'watched text',
     envFile: '.env file',
+    historyUnchecked: 'history too large, only the current files were checked',
+    unchecked: 'a different repo goes public; its content cannot be checked from here',
   },
 } as const
 
@@ -127,59 +131,155 @@ function resolveDir(cwd: string, dir: string | null, home: string | null): strin
 
 type Scan = { repo: string; findings: Finding[] }
 
-// Mi menne ki: a távoli ágon még nem lévő commitok (üzenet + hozzáadott sorok), vagy ha nincs mihez mérni, az egész fa.
+// A git saját sorrendje: branch.<b>.pushRemote, remote.pushDefault, branch.<b>.remote, végül origin.
+async function defaultRemote($: EngineInterface, dir: string): Promise<string> {
+  const branch = (await run($, ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], dir)).stdout.trim()
+  for (const key of [`branch.${branch}.pushRemote`, 'remote.pushDefault', `branch.${branch}.remote`]) {
+    if (branch === '' && key.startsWith('branch.')) continue
+    const value = (await run($, ['git', 'config', '--get', key], dir)).stdout.trim()
+    if (value !== '' && value !== '.') return value
+  }
+  return 'origin'
+}
+
+// A git hibája vagy csonkolt kimenete nem jelentheti azt, hogy „nincs mit nézni”: ilyenkor a push nem megy ki.
+async function must($: EngineInterface, argv: string[], cwd: string, okCodes: readonly number[] = [0]) {
+  const r = await run($, argv, cwd)
+  if (!okCodes.includes(r.exitCode)) throw new Error(`${argv.join(' ')}: exit ${r.exitCode}`)
+  return r
+}
+
+type Target = { dir: string; remote: string; repo: string | null; label: string; tips: string[]; history: boolean }
+
+// Mi menne ki: a távoli repón még nem lévő commitok (üzenet + hozzáadott sorok). Ha a távolinak még
+// nincs egy ága sem (első push, nyilvánossá tétel), a teljes history gyanús sorait nézzük.
+async function scanTarget($: EngineInterface, target: Target, home: string | null): Promise<Finding[]> {
+  const { dir, remote, tips } = target
+  let lines: Line[] = []
+  let envs: string[] = []
+  const known = target.history
+    ? ''
+    : (await run($, ['git', 'for-each-ref', '--count=1', '--format=%(refname)', `refs/remotes/${remote}/`], dir)).stdout.trim()
+  const exclude = known === '' ? [] : ['--not', `--remotes=${remote}`]
+  const format = ['--no-color', '--no-ext-diff']
+
+  // A commit üzenetek mindig mind (kicsik), a változások a távoli ágakhoz képest.
+  const messages = await must($, ['git', 'log', ...format, '--format=%x1e%h%n%B%x1f', ...tips, ...exclude], dir)
+  if (messages.isStdoutTruncated) throw new Error('git log: output truncated')
+  if (messages.stdout.trim() === '') return []
+  lines.push(...addedLines(messages.stdout))
+
+  const patchArgs = known === '' ? ['-i', '-G', prefilter(home)] : []
+  const patches = await must($, ['git', 'log', '-p', ...format, '--format=', ...patchArgs, ...tips, ...exclude], dir)
+  const found: Finding[] = []
+  if (patches.isStdoutTruncated) {
+    // Túl nagy history: a mostani fát nézzük át, és szólunk, hogy a régebbi commitok átnézetlenek.
+    for (const tip of tips.filter(t => !t.startsWith('-'))) {
+      const grep = await must($, ['git', 'grep', '-I', '-n', '-i', '-E', prefilter(home), tip], dir, [0, 1])
+      if (grep.isStdoutTruncated) throw new Error('git grep: output truncated')
+      lines.push(...grepLines(grep.stdout, tip))
+      const tree = (await must($, ['git', 'ls-tree', '-r', '--name-only', tip], dir)).stdout
+      envs.push(...envFiles(tree.split('\n').map(f => `+++ b/${f}`).join('\n')))
+    }
+    found.push({ kind: 'historyUnchecked', file: target.label, line: 0, value: `history:${target.label}`, shown: '' })
+  } else {
+    lines.push(...addedLines(patches.stdout))
+    envs.push(...envFiles(patches.stdout))
+  }
+  if (known === '') {
+    // A .env fájl akkor is kimegy, ha nincs benne gyanús sor.
+    const tree = await must($, ['git', 'log', '--no-color', '--format=', '--name-only', '--diff-filter=AM', ...tips], dir)
+    envs.push(...envFiles(tree.stdout.split('\n').filter(f => f !== '').map(f => `+++ b/${f}`).join('\n')))
+  }
+  lines = lines.filter(l => l.text !== '')
+  envs = [...new Set(envs)]
+
+  const repo = target.repo
+  const owner = repo?.split('/')[0] ?? null
+  const allow = await allowed($, repo)
+  found.push(
+    ...scanLines(lines, {
+      home,
+      privateRepos: owner === null ? [] : (await privateRepos($, owner, dir)).filter(r => r.toLowerCase() !== repo?.toLowerCase() && r.toLowerCase() !== repo?.split('/')[1]?.toLowerCase()),
+      watch: await strings($, 'watch'),
+      allow,
+      ownEmail: (await run($, ['git', 'config', 'user.email'], dir)).stdout.trim() || null,
+    }),
+  )
+  const allowSet = new Set(allow.map(a => a.toLowerCase()))
+  for (const file of envs) {
+    if (!allowSet.has(file.toLowerCase())) found.unshift({ kind: 'envFile', file, line: 0, value: file, shown: file })
+  }
+  return found.filter(f => !allowSet.has(f.value.toLowerCase()))
+}
+
 async function scan($: EngineInterface, command: string): Promise<Scan | null> {
-  const push = parsePush(command)
-  const flip = goesPublic(command)
-  if (push === null && !flip) return null
+  const pushes = parsePushes(command)
+  const flip = publicTarget(command)
+  if (pushes.length === 0 && flip === null) return null
 
   const home = (await $.env.get('HOME')) ?? null
-  const dir = resolveDir(await $.session.cwd(), push?.dir ?? null, home)
-  const remote = push?.remote ?? 'origin'
-  const url = /[:/]/.test(remote) ? remote : (await run($, ['git', 'remote', 'get-url', '--push', remote], dir)).stdout.trim()
-  const repo = githubRepo(url)
-  if (repo === null && url === '') return null
-  if (!flip && repo !== null && ['PRIVATE', 'INTERNAL'].includes(await visibilityOf($, repo, dir))) return null
+  const cwd = await $.session.cwd()
+  const targets: Target[] = []
 
-  let lines: Line[]
-  let envs: string[]
-  const tip = push?.src ?? 'HEAD'
-  let base: string | null = null
-  if (push !== null && !flip) {
-    let dst = push.dst ?? (tip === 'HEAD' ? null : tip.replace(/^refs\/heads\//, ''))
-    if (dst === null) dst = (await run($, ['git', 'rev-parse', '--abbrev-ref', 'HEAD'], dir)).stdout.trim()
-    for (const candidate of [`refs/remotes/${remote}/${dst}`, `refs/remotes/${remote}/HEAD`]) {
-      if ((await run($, ['git', 'rev-parse', '--verify', '-q', candidate], dir)).exitCode === 0) {
-        base = candidate
-        break
-      }
+  if (flip !== null) {
+    const dir = resolveDir(cwd, flip.source, home)
+    const url = (await run($, ['git', 'remote', 'get-url', '--push', 'origin'], dir)).stdout.trim()
+    const local = githubRepo(url)
+    const isGit = (await run($, ['git', 'rev-parse', '--git-dir'], dir)).exitCode === 0
+    if (flip.create) {
+      // `gh repo create --public` --push nélkül üres repót hoz létre: nincs mit nézni.
+      if (flip.source !== null && isGit) targets.push({ dir, remote: 'origin', repo: flip.repo, label: flip.repo ?? dir, tips: ['--all'], history: true })
+    } else if (isGit && (flip.repo === null || flip.repo.toLowerCase() === local?.toLowerCase())) {
+      targets.push({ dir, remote: 'origin', repo: local, label: local ?? url, tips: ['--all'], history: true })
+    } else {
+      // Más repót tennénk nyilvánossá, mint ami ebben a mappában van: a tartalmát innen nem látjuk.
+      const label = flip.repo ?? '?'
+      if ((await allowed($, label)).includes(`unchecked:${label}`)) return null
+      return { repo: label, findings: [{ kind: 'unchecked', file: label, line: 0, value: `unchecked:${label}`, shown: label }] }
     }
   }
-  if (base !== null) {
-    const log = (await run($, ['git', 'log', '-p', '--no-color', '--no-ext-diff', '--format=%x1e%h%n%B%x1f', `${base}..${tip}`], dir)).stdout
-    if (log.trim() === '') return null
-    lines = addedLines(log)
-    envs = envFiles(log)
-  } else {
-    const grep = await run($, ['git', 'grep', '-I', '-n', '-i', '-E', PREFILTER, tip], dir)
-    lines = grepLines(grep.stdout, tip)
-    const tree = (await run($, ['git', 'ls-tree', '-r', '--name-only', tip], dir)).stdout
-    envs = envFiles(tree.split('\n').map(f => `+++ b/${f}`).join('\n'))
+
+  for (const push of pushes) {
+    const dir = resolveDir(cwd, push.dir, home)
+    const remote = push.remote ?? (await defaultRemote($, dir))
+    const url = /[:/]/.test(remote) ? remote : (await run($, ['git', 'remote', 'get-url', '--push', remote], dir)).stdout.trim()
+    // Ismeretlen távoli: a git push úgyis elhasal, nincs mit kivinni.
+    if (url === '') continue
+    const repo = githubRepo(url)
+    if (repo !== null && flip === null && ['PRIVATE', 'INTERNAL'].includes(await visibilityOf($, repo, dir))) continue
+    const tips = push.all ? ['--branches', '--tags'] : push.refs.map(r => r.src)
+    // Közvetlen URL-re pusholva nincs távoli követő ág, amihez mérhetnénk: a teljes history-t nézzük.
+    targets.push({ dir, remote, repo, label: repo ?? url, tips, history: /[:/]/.test(remote) })
   }
 
-  const owner = repo?.split('/')[0] ?? null
-  const findings = scanLines(lines, {
-    home,
-    privateRepos: owner === null ? [] : (await privateRepos($, owner, dir)).filter(r => r.toLowerCase() !== repo?.toLowerCase() && r.toLowerCase() !== repo?.split('/')[1]?.toLowerCase()),
-    watch: await strings($, 'watch'),
-    allow: await strings($, 'allow'),
-    ownEmail: (await run($, ['git', 'config', 'user.email'], dir)).stdout.trim() || null,
-  })
-  const allow = new Set((await strings($, 'allow')).map(a => a.toLowerCase()))
-  for (const file of envs) {
-    if (!allow.has(file.toLowerCase())) findings.unshift({ kind: 'envFile', file, line: 0, value: file, shown: file })
+  const findings: Finding[] = []
+  const seen = new Set<string>()
+  for (const target of targets) {
+    for (const f of await scanTarget($, target, home)) {
+      const key = `${f.kind}|${f.value}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      findings.push(f)
+    }
   }
-  return findings.length === 0 ? null : { repo: repo ?? url, findings }
+  return findings.length === 0 ? null : { repo: targets.map(t => t.label).filter((l, i, a) => a.indexOf(l) === i).join(', '), findings }
+}
+
+// Repónként megjegyzett kivételek, plusz a régi, közös lista (korábbi verziókból).
+async function allowed($: EngineInterface, repo: string | null): Promise<string[]> {
+  const byRepo = ((await $.store.get('allowByRepo')) ?? {}) as Record<string, unknown>
+  const own = repo === null ? [] : byRepo[repo.toLowerCase()]
+  return [...(await strings($, 'allow')), ...(Array.isArray(own) ? own.filter((v): v is string => typeof v === 'string') : [])]
+}
+
+async function remember($: EngineInterface, repo: string, values: readonly string[]): Promise<void> {
+  const byRepo = { ...(((await $.store.get('allowByRepo')) ?? {}) as Record<string, string[]>) }
+  for (const r of repo.split(', ')) {
+    const key = r.toLowerCase()
+    byRepo[key] = [...new Set([...(byRepo[key] ?? []), ...values])]
+  }
+  await $.store.set('allowByRepo', byRepo)
 }
 
 function listOf(findings: readonly Finding[], max: number): string {
@@ -232,6 +332,8 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (!(await read($, isOn))) return next(e)
+    // A láthatóság-váltás után a tárolt „privát” eredmény már nem igaz.
+    if (publicTarget(e.command) !== null) visibility.clear()
     const found = await scan($, e.command)
     if (found === null) return next(e)
 
@@ -246,7 +348,7 @@ export const register: Register = (on, options) => {
     }
     if (answer === t().push) return next(e)
     if (answer === t().remember) {
-      await $.store.set('allow', [...new Set([...(await strings($, 'allow')), ...found.findings.map(f => f.value)])])
+      await remember($, found.repo, found.findings.map(f => f.value))
       return next(e)
     }
     if (answer === t().deny) return { deny: t().denied(found.repo, listOf(found.findings, 40)) }
@@ -255,7 +357,7 @@ export const register: Register = (on, options) => {
     if (next.called) return next(e)
     // Hibánál csak a push és a láthatóság-váltás áll meg; minden más parancs fut tovább.
     try {
-      if (parsePush(e.command) === null && !goesPublic(e.command)) return next(e)
+      if (parsePushes(e.command).length === 0 && publicTarget(e.command) === null) return next(e)
     } catch {
       if (!/\bgit\b[^;&|]*\bpush\b|\bgh\s+repo\b/.test(e.command)) return next(e)
     }
