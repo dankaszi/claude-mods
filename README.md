@@ -2,10 +2,12 @@
 
 Saját Claude Code mod-ok (function hook pluginek) egy pluginpiacon.
 
+A [Szotasz/claude-mods](https://github.com/Szotasz/claude-mods) (Szota Szabolcs) másolata, javításokkal.
+
 ## Telepítés
 
 ```
-claude plugin marketplace add Szotasz/claude-mods
+claude plugin marketplace add dankaszi/claude-mods
 claude plugin install usage-band@claude-mods
 claude plugin install usage-header@claude-mods
 claude plugin install project-pane@claude-mods
@@ -32,7 +34,9 @@ A státuszsorba (a prompt alá) írja:
 - modell neve (`/model` váltáskor és turn végén frissül)
 - kontextusablak telítettsége
 - 5 órás és heti rate-limit, reset időponttal (csak Pro/Max előfizetéssel)
-- ⚠ 90% felett, és egy toast, amikor egy limit átlépi (ablakonként, resetenként egyszer)
+- ⚠ 90% felett, és egy toast, amikor egy limit átlépi (ablakonként, resetenként egyszer; ha visszaesik alá, újra szólhat)
+- a reset időpont a gép időzónájában (a `TZ`, a `/etc/localtime` vagy a `date +%z` alapján; a mod környezete egyébként UTC-ben futna)
+- `/limitsav` kapcsolja, `/limitsav be|ki` beállítja; az eszköztárban (`/eszkozok`) is kapcsolható
 
 **Nyelv / Language:** `/config` → `usage-band.language`, vagy a `settings.json`-ban:
 
@@ -58,9 +62,9 @@ Limitek    5 óra ███████░░░░░░░░░░░░░ 3
 
 - A kontextussáv minden kategóriája a `/context` saját színével látszik (rendszerprompt, eszközök, MCP, memóriafájlok, skillek, ágensek, üzenetek), utána a tömörítési tartalék és a szabad hely halványan; alatta jelmagyarázat tokenszámmal. Az igény szerint betöltött (halasztott) eszközsémák kimaradnak, mert nincsenek az ablakban.
 - A bontás helyi becslés (`$.session.usage({ breakdown: 'summary' })`), API-hívás nélkül; minden turn végén és limitmozduláskor frissül.
-- Limitek: zöld 70% alatt, sárga 70–90%, piros 90% fölött (⚠), reset időponttal. Csak Pro/Max előfizetéssel van adat.
+- Limitek: zöld 70% alatt, sárga 70–90%, piros 90% fölött (⚠), reset időponttal a gép időzónájában. Csak Pro/Max előfizetéssel van adat.
 - `/hasznalat` kapcsolja, `/hasznalat be|ki` beállítja; az állapotot sessionök között megőrzi. Az eszköztárban (`/eszkozok`) is kapcsolható.
-- A sávot megosztja a fókusz mód listájával és az eszköztárral (azok alatt jelenik meg).
+- A sávot megosztja a fókusz mód listájával és az eszköztárral. A sorrendjük a modok betöltési sorrendjétől függ.
 
 Beállítás (`/config`): `usage-header.language` (`auto`/`hu`/`en`).
 
@@ -91,7 +95,9 @@ GitHub  Netlify  Supabase
 - **Szinkron gomb** (`s`): csak fast-forward, soha nem merge-öl, rebase-el vagy töröl.
   - a branch lemaradt az upstreamtől → `git pull --ff-only`
   - másik branchen vagy, és az alapértelmezett (main) előrébb jár → `git switch main` + `git merge --ff-only origin/main`
-  - commitolatlan módosítás esetén csak „Stash + szinkron” van: `git stash push -u`, vissza: `git stash pop`
+  - commitolatlan módosítás esetén csak „Stash + szinkron” van: `git stash push -u`; visszaállítás azon a branchen, ahonnan félretette (a toast megmondja): `git switch <branch> && git stash pop`
+  - leválasztott HEAD-nél (nem branchen állsz) nincs szinkron gomb, mert az elváltás elárvítaná az ott készült commitokat
+  - két gyors gombnyomás is csak egy szinkront indít; ha elakad, a hibát a promptban lévő szöveg **után** fűzi
   - ha elakad, a hibát Claude-nak szóló kérdésként a promptba teszi
 - **Frissítés** (`r`): 60 mp-enként és minden turn végén; `git fetch` 5 percenként.
 - **Kérdezd Claude-ot** (`a`): a legutóbbi elbukott CI-futásról kérdést tesz a promptba.
@@ -130,17 +136,20 @@ Eszköztár: egy helyről kapcsolhatók a fenti modok. A prompt alatti lábléc 
 
 ```
 ⚙ Szabolcs eszközei  kattintás, vagy ctrl+x tab után szám  [ Bezár ]
-1. Fókusz mód     ● BE  [ Kikapcsol ] · Csak a részfeladatok listája és a végső válasz látszik
-2. Limitsáv       ○ KI  [ Bekapcsol ] · Alsó sáv: 5 órás és heti limit, kontextusablak
-3. Használati sáv ● BE  [ Kikapcsol ] · Prompt fölött: kontextus kategóriánként színezve, 5 órás és heti limit
-4. Projektpanel   ● BE  [ Kikapcsol ] · GitHub, CI, Netlify és Supabase állapot oldalt
-5. Kígyó játék    ● BE  [ Kikapcsol ] · Oldalt nyílik promptküldéskor, amíg Claude dolgozik
+1. Fókusz mód      ● BE  [ Kikapcsol ] · Csak a részfeladatok listája és a végső válasz látszik
+2. Limitsáv        ○ KI  [ Bekapcsol ] · Alsó sáv: 5 órás és heti limit, kontextusablak
+3. Használati sáv  ● BE  [ Kikapcsol ] · Prompt fölött: kontextus kategóriánként színezve, 5 órás és heti limit
+4. Projektpanel    ● BE  [ Kikapcsol ] · GitHub, CI, Netlify és Supabase állapot oldalt
+5. Kígyó játék     ● BE  [ Kikapcsol ] · Oldalt nyílik promptküldéskor, amíg Claude dolgozik
+6. Supabase-őr     ● BE  [ Kikapcsol ] · Rossz projektre menő és romboló Supabase-hívás előtt rákérdez
+7. Push-őr         ● BE  [ Kikapcsol ] · Nyilvános repóba push előtt titkokat, ID-ket, e-maileket keres
+8. Döntési felugró ● BE  [ Kikapcsol ] · A döntések egygombos kérdésként jönnek, keretben
 ```
 
-- Modonként BE/KI állapot és kapcsoló gomb, `ctrl+x tab` után az `1`–`5` számbillentyűvel is.
+- Modonként BE/KI állapot és kapcsoló gomb, `ctrl+x tab` után az `1`–`8` számbillentyűvel is.
 - Ami nincs telepítve, „nincs betöltve” felirattal jelenik meg.
 - Bekapcsolt fókusz módnál a lábléc is kiírja: „Fókusz mód”.
-- Parancsból is ugyanez: `/fokusz`, `/limitsav`, `/hasznalat`, `/project`, `/jatek` (mind `be|ki` argumentummal).
+- Parancsból is ugyanez: `/fokusz`, `/limitsav`, `/hasznalat`, `/project`, `/jatek`, `/supaor`, `/pushor`, `/dontes` (mind `be|ki` argumentummal).
 - A sávot megosztja a fókusz mód listájával (a kapcsolók alatta jelennek meg).
 
 Új mod felvétele az eszköztárba: a mod írja a saját `isOn` állapotát, adjon `/<parancs> be|ki`-t, és hookolja a `state.set`-et `{ plugin: 'tool-hub', key: 'request' }`-re; a hubban egy sor a `TOOLS` listába, egy ág a `stateOf`-ba és a kulcs a `types/index.d.ts`-be.
@@ -166,7 +175,11 @@ w: ↑ a: ← s: ↓ d: → p: szünet r: új
 - Promptküldéskor magától megnyílik (ha ebben a sessionben bezártad, már nem; `/jatek` mindig nyitja). `/jatek ki` kikapcsolja, az eszköztárban (`/eszkozok`) is kapcsolható.
 - Irányítás: kattints a táblára, utána nyilak / `wasd` / `hjkl`, szóköz vagy `p` szünet, `r` új játék. Vagy `ctrl+x tab` a panelre, és a `w a s d p r` gombok.
 - A turn végén a futó játék szünetel („Claude végzett”), hogy visszatérj a munkához.
-- A pontszámmal gyorsul; a rekordot sessionök között megőrzi.
+- A pontszámmal gyorsul; a rekordot már a megdöntésekor elmenti, és sessionök között megőrzi (holtverseny nem „új rekord”).
+- A tábla követi a panel méretét; ha a kígyó már nem fér el, új játék indul.
+- Csak a fő beszélgetés turnje számít munkának: egy háttérágens nem ragasztja be a „Claude dolgozik” állapotot.
+
+Beállítás (`/config`): `snake-pane.language` (`auto`/`hu`/`en`), `snake-pane.autoOpen` (alapból be: promptküldéskor nyílik).
 - A játék a rajzoló szálon fut (`Client` surface modul), nem terheli a sessiont.
 
 ### supabase-guard
@@ -174,9 +187,11 @@ w: ↑ a: ← s: ↓ d: → p: szünet r: új
 Supabase-őr: megállítja a Supabase-hívást, ha nem az aktuális mappa projektjére menne, és egygombos felugróban rákérdez.
 
 - A mappa projektjét a `supabase/.temp/project-ref`, a `.env*` fájlok `https://<ref>.supabase.co` címei és a `CLAUDE.md` (ha egyetlen projekt-ID-t említ) adják, plusz amit a felugróban „Ez a mappa projektje” gombbal megerősítettél.
-- Más projektre menő írás (MCP `execute_sql`, `apply_migration`, `deploy_edge_function`, branch-műveletek, illetve `supabase db push --project-ref …`): kérdez — **Megtiltom / Engedélyezem / Ez a mappa projektje**.
-- Romboló művelet a saját projekten is kérdez: `DROP`, `TRUNCATE`, `DELETE FROM`, `WHERE` nélküli `UPDATE`, `REVOKE`, RLS kikapcsolása, `reset_branch`, `delete_branch`, `pause_project`, `supabase db reset --linked`.
-- Ha a mappához nem talál projektet, írás előtt kérdez (van „Engedem a session végéig” gomb is).
+- Más projektre menő írás (MCP `execute_sql`, `apply_migration`, `deploy_edge_function`, branch-műveletek, illetve `supabase db push --project-ref …` / `--db-url …`, `supabase link`): kérdez — **Megtiltom / Engedélyezem / Ez a mappa projektje**.
+- A CLI-t `npx`/`bunx`/`pnpm dlx`/`./node_modules/.bin/supabase` alakban is felismeri, és a Supabase-adatbázisra menő `psql`-t is.
+- Romboló művelet a saját projekten is kérdez: bármilyen `DROP`, `TRUNCATE`, `DELETE FROM`, `MERGE … DELETE`, `WHERE` nélküli `UPDATE` (al-lekérdezésben vagy CTE-ben is), `REVOKE`, `anon`/`public` felé `GRANT`, `using (true)` policy, RLS kikapcsolása, `pg_terminate_backend`, `reset_branch`, `delete_branch`, `merge_branch`, `pause_project`, `supabase db reset --linked|--db-url`, `migration down`, `storage rm`.
+- Az SQL-t a szövegkonstansok és kommentek nélkül nézi: `select '--'; drop table x` és `drop/**/table x` sem csúszik át, `select 'drop table x'` viszont nem riaszt.
+- Ha a mappához nem talál projektet, írás előtt kérdez (van „Engedem a session végéig” gomb is, ez mappához kötött).
 - Más projekt **olvasása** fut, de a modell kap egy figyelmeztetést, hogy ne a rossz projektről vonjon le következtetést.
 - Hiba esetén zárva marad: ha az ellenőrzés elhasal, a Supabase-hívás nem fut le. `/supaor be|ki`, vagy az eszköztárban.
 
@@ -184,9 +199,11 @@ Supabase-őr: megállítja a Supabase-hívást, ha nem az aktuális mappa projek
 
 Push-őr: nyilvános GitHub-repóba push előtt (és `gh repo edit --visibility public` / `gh repo create --public` előtt) átnézi, mi menne ki.
 
-- A távoli ágon még nem lévő commitokat nézi (üzenet + hozzáadott sorok, a history is); ha nincs mihez mérni, az egész fát. Kezeli a `git push origin forrás:cél` alakot is.
+- A távoli repón még nem lévő commitokat nézi (üzenet + hozzáadott sorok); első pushnál és nyilvánossá tételnél a teljes history gyanús sorait. Ha az túl nagy, a mostani fájlokat nézi, és szól, hogy a régebbi commitok átnézetlenek.
+- Felismeri: `git push origin forrás:cél`, több refspec, `--all`/`--mirror`/`--tags`, `git push 2>&1 | tail`, láncolt parancsok (`&&`, `;`), `git -C <mappa>`, `--repo`; a sima `git push` a git saját távoli-választását követi (`pushRemote`, `pushDefault`, upstream).
+- Ha a git elhasal vagy a kimenete csonkolódik, a push nem megy ki (zárva marad).
 - Keres: Supabase projekt-ID (URL, `project_id`, táblázatsor), JWT / Supabase-kulcs, Stripe/Anthropic/OpenAI/GitHub/AWS/Google/Slack/Resend/Telegram/ElevenLabs kulcsok, privát kulcs, e-mail-cím (a saját git e-mail és a noreply/példa címek kivételével), helyi `/Users/<te>/` útvonal, privát repóid nevei (`gh repo list --visibility private`), `.env` fájlok, és amit `/pushor figyel <szöveg>`-gel felvettél.
-- Találatnál felugró, maszkolt listával — **Megtiltom / Pushold így is / Pushold, jegyezd meg** (az utóbbi kivételként megjegyzi a találatokat). Tiltáskor a modell megkapja a teljes listát a javításhoz.
+- Találatnál felugró, maszkolt listával — **Megtiltom / Pushold így is / Pushold, jegyezd meg** (az utóbbi az adott repóra kivételként megjegyzi a találatokat). Tiltáskor a modell megkapja a teljes listát a javításhoz.
 - Privát repóba menő pushnál nem csinál semmit. Kell hozzá a `gh` CLI (bejelentkezve). `/pushor be|ki`.
 
 ### decision-popup
@@ -194,7 +211,7 @@ Push-őr: nyilvános GitHub-repóba push előtt (és `gh repo edit --visibility 
 Döntési felugró: a döntések egygombos kérdésként jönnek.
 
 - A rendszerpromptban arra kéri Claude-ot, hogy minden döntést (engedélyezés, A vagy B, visszafordíthatatlan vagy kifelé ható lépés) az AskUserQuestion dialógussal kérdezzen meg, 2–4 rövid opcióval, a javasoltat vagy a biztonságosabbat elöl — egy számgombbal válaszolsz.
-- A dialógus keretet és címet kap („Döntés kell”); az őr-modok (supabase-guard, public-repo-guard) kérdése piros keretben, „Az őr megállított egy műveletet” címmel.
+- A dialógus keretet és címet kap („Döntés kell”); az őr-modok (supabase-guard, public-repo-guard) kérdése piros keretben, „Az őr megállított egy műveletet” címmel. A piros keretet csak az őr-mod saját, éppen feltett kérdése kapja: a modell egy hasonló fejlécű kérdéssel nem kölcsönözheti az őr tekintélyét.
 - `/dontes be|ki`, vagy az eszköztárban.
 
 ## Ötletek
