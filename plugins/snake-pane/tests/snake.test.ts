@@ -106,3 +106,14 @@ test('a rekordot elmenti, a hamisat eldobja, és sessionök között megtartja',
   expect(await ui.find({ in: 'board', type: 'Text', text: 'Rekord: 12' })).toBeDefined()
   await ui.unmount()
 })
+
+test('háttérágens turnje nem ragasztja be a „Claude dolgozik” állapotot', HU, async ($, on) => {
+  engine(on)
+  await start($)
+  await $.turn.start({ turnId: 't1', prompt: 'x' } as never)
+  await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: false, reason: 'answer' } as never)
+  await $.turn.start({ turnId: 't2', prompt: 'y', agentId: 'bg-1' } as never)
+  const ui = await $.ui.mount({ plugin: 'snake-pane', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /Claude dolgozik/ })).toBeUndefined()
+  await ui.unmount()
+})

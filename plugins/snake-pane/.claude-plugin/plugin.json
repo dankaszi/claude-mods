@@ -1,6 +1,6 @@
 {
   "name": "snake-pane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Snake in the side pane while Claude works: opens when you send a prompt, pauses when the turn ends, keeps your best score. /jatek be|ki. Hungarian or English.",
   "author": {
     "name": "Szota Szabolcs",

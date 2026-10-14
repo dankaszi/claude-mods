@@ -64,7 +64,7 @@
     },
     {
       "name": "snake-pane",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Kígyó játék az oldalpanelben, amíg Claude dolgozik: promptküldéskor nyílik, a turn végén szünetel, rekordot ment. /jatek be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
