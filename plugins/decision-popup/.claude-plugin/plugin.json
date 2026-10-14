@@ -1,6 +1,6 @@
 {
   "name": "decision-popup",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Decision popup: Claude asks every decision (approve/refuse, A or B, irreversible steps) as a one-key question, drawn in a framed popup; guard mods' questions get a red frame. /dontes toggles. Hungarian or English.",
   "types": "./types/index.d.ts",
   "author": {

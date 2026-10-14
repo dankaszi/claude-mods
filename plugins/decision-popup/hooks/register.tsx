@@ -5,14 +5,17 @@ const isOn = atom({ plugin: 'decision-popup', key: 'isOn' } as const, true)
 
 type Lang = 'hu' | 'en'
 
-// Az őr-modok kérdéseinek fejléce: ezek piros keretet kapnak.
-const GUARD_HEADERS = new Set(['Supabase-őr', 'Supabase', 'Push-őr', 'Push guard'])
+// Az őr-modok éppen feltett kérdése. A fejléc nem elég: azt a modell is beírhatja egy saját AskUserQuestion-be,
+// és így az őr tekintélyével kérdezhetne. Ezt az állapotot csak az őr-mod maga írja.
+const SUPABASE_ASKING = { plugin: 'supabase-guard', key: 'asking' } as const
+const PUSH_ASKING = { plugin: 'public-repo-guard', key: 'asking' } as const
 
 const STRINGS = {
   hu: {
     title: 'Döntés kell',
     guard: 'Az őr megállított egy műveletet',
-    hint: (n: number) => (n > 1 ? `Válassz egy gombnyomással: 1–${n} · Esc = elvetés` : 'Esc = elvetés'),
+    hint: (n: number, multi: boolean) =>
+      multi ? 'Jelöld be, amit választasz, aztán Enter · Esc = elvetés' : n > 1 ? `Válassz egy gombnyomással: 1–${n} · Esc = elvetés` : 'Esc = elvetés',
     command: 'Döntési felugró be/ki: a döntések egygombos kérdésként jönnek',
     on: 'Döntési felugró bekapcsolva: a döntéseket egygombos kérdésként kapod.',
     off: 'Döntési felugró kikapcsolva.',
@@ -21,7 +24,8 @@ const STRINGS = {
   en: {
     title: 'Decision needed',
     guard: 'A guard stopped an action',
-    hint: (n: number) => (n > 1 ? `Answer with one key: 1–${n} · Esc dismisses` : 'Esc dismisses'),
+    hint: (n: number, multi: boolean) =>
+      multi ? 'Tick your choices, then Enter · Esc dismisses' : n > 1 ? `Answer with one key: 1–${n} · Esc dismisses` : 'Esc dismisses',
     command: 'Decision popup on/off: decisions come as one-key questions',
     on: 'Decision popup on: decisions come to you as one-key questions.',
     off: 'Decision popup off.',
@@ -39,14 +43,24 @@ const PROMPT = `Decisions go to the person as a one-key popup.
 - Do not invent a choice where a sensible default exists; decide those yourself and say what you chose.
 - If a tool call is refused with a message that the person did not allow it, do not retry it another way.`
 
-type Question = { header?: unknown; options?: unknown }
+type Question = { question?: unknown; header?: unknown; options?: unknown; multiSelect?: unknown }
 
-export function firstQuestion(questions: readonly unknown[]): { header: string; options: number } {
+export function firstQuestion(questions: readonly unknown[]): { text: string; header: string; options: number; multi: boolean } {
   const q = (questions[0] ?? {}) as Question
   return {
+    text: typeof q.question === 'string' ? q.question : '',
     header: typeof q.header === 'string' ? q.header : '',
     options: Array.isArray(q.options) ? q.options.length : 0,
+    multi: q.multiSelect === true,
   }
+}
+
+async function isGuardQuestion($: EngineInterface, text: string): Promise<boolean> {
+  if (text === '') return false
+  // Ha az őr-mod nincs telepítve, az állapota nem olvasható: az nem őr-kérdés.
+  const supabase = await $.state.get(SUPABASE_ASKING).then(r => r.value, () => null)
+  const push = await $.state.get(PUSH_ASKING).then(r => r.value, () => null)
+  return supabase === text || push === text
 }
 
 async function pickLanguage($: EngineInterface, setting: unknown): Promise<Lang> {
@@ -102,14 +116,14 @@ export const register: Register = (on, options) => {
     if (!(await read($, isOn))) return dialog
     const { Box, Text } = $.ui.resolve(e)
     const q = firstQuestion(e.props.questions)
-    const isGuard = GUARD_HEADERS.has(q.header)
+    const isGuard = await isGuardQuestion($, q.text)
     const color = isGuard ? 'error' : 'permission'
     const title = isGuard ? `🛡  ${t().guard} · ${q.header}` : `◆ ${t().title}${q.header === '' ? '' : ` · ${q.header}`}`
     return (
       <Box flexDirection="column" borderStyle="round" borderColor={color} paddingX={1}>
         <Box>
           <Text bold color={color}>{title}</Text>
-          <Text dimColor>{`  ${t().hint(q.options)}`}</Text>
+          <Text dimColor>{`  ${t().hint(q.options, q.multi)}`}</Text>
         </Box>
         {dialog}
       </Box>

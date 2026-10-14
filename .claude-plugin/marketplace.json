@@ -97,7 +97,7 @@
     },
     {
       "name": "decision-popup",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Döntési felugró: Claude minden döntést (engedélyezés, A vagy B, visszafordíthatatlan lépés) egygombos kérdésként tesz fel, keretes felugróban; az őr-modok kérdése piros keretet kap. /dontes be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",

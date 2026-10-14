@@ -5,6 +5,8 @@ import { LOOK_IN, actionRisk, isRef, refsIn, short, supabaseAction, supabaseCli 
 import type { Risk } from './classify'
 
 const isOn = atom({ plugin: 'supabase-guard', key: 'isOn' } as const, true)
+// Az éppen feltett kérdés szövege: a decision-popup ez alapján rajzol piros „őr” keretet.
+const asking = atom({ plugin: 'supabase-guard', key: 'asking' } as const, null)
 
 type Lang = 'hu' | 'en'
 
@@ -156,9 +158,12 @@ async function judge($: EngineInterface, ref: string | null, risk: Risk, what: s
 
   let answer: string
   try {
+    await update($, asking, () => question)
     answer = await $.ui.ask(question, { header: t().header, options })
   } catch {
     return { allow: false, reason: t().dismissed(what) }
+  } finally {
+    await update($, asking, () => null).catch(() => undefined)
   }
   if (answer === t().once) return { allow: true }
   if (answer === t().session) {

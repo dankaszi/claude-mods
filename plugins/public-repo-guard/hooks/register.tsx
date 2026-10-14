@@ -5,6 +5,8 @@ import { addedLines, envFiles, githubRepo, grepLines, parsePushes, prefilter, pu
 import type { Finding, Line } from './scan'
 
 const isOn = atom({ plugin: 'public-repo-guard', key: 'isOn' } as const, true)
+// Az éppen feltett kérdés szövege: a decision-popup ez alapján rajzol piros „őr” keretet.
+const asking = atom({ plugin: 'public-repo-guard', key: 'asking' } as const, null)
 
 type Lang = 'hu' | 'en'
 
@@ -338,13 +340,17 @@ export const register: Register = (on, options) => {
     if (found === null) return next(e)
 
     let answer: string
+    const question = t().question(found.repo, found.findings.length, listOf(found.findings, 8))
     try {
-      answer = await $.ui.ask(t().question(found.repo, found.findings.length, listOf(found.findings, 8)), {
+      await update($, asking, () => question)
+      answer = await $.ui.ask(question, {
         header: t().header,
         options: [t().deny, t().push, t().remember],
       })
     } catch {
       return { deny: t().dismissed }
+    } finally {
+      await update($, asking, () => null).catch(() => undefined)
     }
     if (answer === t().push) return next(e)
     if (answer === t().remember) {
