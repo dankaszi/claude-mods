@@ -22,6 +22,10 @@ let root: string | undefined
 let lastFetch: number | undefined
 let startedAt = 0
 let isRefreshing = false
+// Frissítés közben érkezett újabb kérés (pl. a szinkron utáni): a futó után lefut (null = nincs).
+let pendingRefresh: boolean | null = null
+// Szinkron folyamatban: szinkron jelző, hogy két gyors gombnyomás ne indítson két szinkront.
+let syncing = false
 const notified = new Set<string>()
 
 // Háttérben indított munka: egy hibája ne legyen kezeletlen (pl. a modul újratöltése közben).
@@ -53,11 +57,13 @@ async function repoRoot($: EngineInterface): Promise<string | undefined> {
 }
 
 async function collectGit($: EngineInterface, dir: string, fetchedAt?: number): Promise<ProjectGit> {
-  const status = parseStatus((await run($, ['git', 'status', '--porcelain=2', '--branch'], dir)).out)
+  // --no-optional-locks: a háttér-frissítés ne fogja az index.lock-ot Claude vagy a felhasználó git parancsai elől.
+  const status = parseStatus((await run($, ['git', '--no-optional-locks', 'status', '--porcelain=2', '--branch'], dir)).out)
 
   const head = await run($, ['git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], dir)
   let defaultBranch = head.ok ? head.out.replace(/^origin\//, '') : 'main'
-  if (!head.ok && (await run($, ['git', 'rev-parse', '--verify', '--quiet', 'origin/master'], dir)).ok) {
+  if (!head.ok && !(await run($, ['git', 'rev-parse', '--verify', '--quiet', 'origin/main'], dir)).ok
+    && (await run($, ['git', 'rev-parse', '--verify', '--quiet', 'origin/master'], dir)).ok) {
     defaultBranch = 'master'
   }
 
@@ -75,12 +81,13 @@ async function collectNetlify($: EngineInterface, dir: string): Promise<ProjectN
   const siteId = json<{ siteId?: string }>(await $.fs.read(`${dir}/.netlify/state.json`).catch(() => ''))?.siteId
   if (siteId === undefined) {
     // netlify.toml van, de nincs összekötve: így is jelezzük, hogy Netlify-os a projekt.
-    return (await $.fs.exists(`${dir}/netlify.toml`)) ? { siteId: '', deploys: [], note: 'no-cli' } : undefined
+    return (await $.fs.exists(`${dir}/netlify.toml`).catch(() => false)) ? { siteId: '', deploys: [], note: 'no-cli' } : undefined
   }
 
   const deploys = await run($, ['netlify', 'api', 'listSiteDeploys', '--data', JSON.stringify({ site_id: siteId, per_page: 3 })], dir)
   if (!deploys.ok) {
-    const missing = /ENOENT|not found|No such file|cannot start|spawn/i.test(deploys.err)
+    // Csak a hiányzó CLI számít „telepítsd” esetnek; egy API „Not Found” (törölt site) hiba.
+    const missing = /ENOENT|command not found|No such file|cannot start|spawn/i.test(deploys.err)
     return { siteId, deploys: [], note: missing ? 'no-cli' : 'error' }
   }
   const site = json<{ name?: string; admin_url?: string }>(
@@ -101,7 +108,10 @@ async function collectSupabase($: EngineInterface, dir: string): Promise<Project
 
   const r = await run($, ['supabase', 'projects', 'list', '-o', 'json'], dir)
   if (!r.ok) return { ...base, note: 'not-logged-in' }
-  const project = json<{ id: string; name: string; status: string; region: string }[]>(r.out)?.find(p => p.id === ref)
+  const projects = json<unknown>(r.out)
+  const project = Array.isArray(projects)
+    ? (projects as { id: string; name: string; status: string; region: string }[]).find(p => p.id === ref)
+    : undefined
   return { ...base, name: project?.name, status: project?.status, region: project?.region }
 }
 
@@ -116,7 +126,7 @@ async function collect($: EngineInterface, dir: string, fetchedAt?: number): Pro
   const [git, prs, runs, netlify, supabase] = await Promise.all([
     collectGit($, dir, fetchedAt),
     gh(['pr', 'list', '--limit', '8', '--json', 'number,title,headRefName,url,reviewDecision,statusCheckRollup']),
-    gh(['run', 'list', '-L', '5', '--json', 'databaseId,name,headBranch,status,conclusion,createdAt,url']),
+    gh(['run', 'list', '-L', '5', '--json', 'databaseId,name,headBranch,status,conclusion,createdAt,updatedAt,url']),
     collectNetlify($, dir),
     collectSupabase($, dir),
   ])
@@ -129,52 +139,73 @@ async function collect($: EngineInterface, dir: string, fetchedAt?: number): Pro
   }
 }
 
-type SyncOutcome = { ok: boolean; step: string; detail?: string; stashed?: boolean }
+// stashedFrom: melyik branch-ről tettük félre a módosításokat (csak ha tényleg került valami a stash-be).
+type SyncOutcome = { ok: boolean; step: string; detail?: string; stashedFrom?: string }
 
-async function runSync($: EngineInterface, dir: string, plan: SyncPlan, stash: boolean): Promise<SyncOutcome> {
-  let stashed = false
+async function runSync($: EngineInterface, dir: string, plan: SyncPlan, stash: boolean, branch: string): Promise<SyncOutcome> {
+  let stashed: string | undefined
   if (stash) {
     const at = new Date(await $.clock.now()).toISOString().slice(0, 16)
+    const stashTop = async () => (await run($, ['git', 'rev-parse', '-q', '--verify', 'refs/stash'], dir)).out
+    const before = await stashTop()
     const s = await run($, ['git', 'stash', 'push', '--include-untracked', '-m', `project-pane sync ${at}`], dir)
     if (!s.ok) return { ok: false, step: 'stash', detail: s.err }
-    stashed = true
+    // „No local changes to save” is 0-val lép ki: csak akkor mondjuk, hogy félretettük, ha nőtt a stash.
+    if ((await stashTop()) !== before) stashed = branch
   }
 
   if (plan.kind === 'pull') {
     const p = await run($, ['git', 'pull', '--ff-only'], dir, 120_000)
-    return { ok: p.ok, step: 'pull', detail: p.err, stashed }
+    return { ok: p.ok, step: 'pull', detail: p.err, stashedFrom: stashed }
   }
   if (plan.kind === 'switch') {
     const sw = await run($, ['git', 'switch', plan.to], dir)
-    if (!sw.ok) return { ok: false, step: 'switch', detail: sw.err, stashed }
+    if (!sw.ok) return { ok: false, step: 'switch', detail: sw.err, stashedFrom: stashed }
     const ff = await run($, ['git', 'merge', '--ff-only', `origin/${plan.to}`], dir, 120_000)
-    return { ok: ff.ok, step: ff.ok ? 'switch' : 'merge', detail: ff.err, stashed }
+    return { ok: ff.ok, step: ff.ok ? 'switch' : 'merge', detail: ff.err, stashedFrom: stashed }
   }
-  return { ok: false, step: 'none', stashed }
+  return { ok: false, step: 'none', stashedFrom: stashed }
 }
 
 async function refresh($: EngineInterface, withFetch = false): Promise<void> {
-  if (root === undefined || isRefreshing || !(await read($, isOn))) return
+  if (isRefreshing) {
+    pendingRefresh = (pendingRefresh ?? false) || withFetch
+    return
+  }
+  if (!(await read($, isOn))) return
   isRefreshing = true
   try {
+    // A session közben a mappa változhat (vagy repón kívül indult): a gyökeret minden frissítéskor újra nézzük.
+    const found = await repoRoot($)
+    if (found !== undefined && found !== root) {
+      root = found
+      lastFetch = undefined
+      withFetch = true
+    }
+    if (root === undefined) return
     if (withFetch && (await run($, ['git', 'fetch', '--quiet', 'origin'], root, 60_000)).ok) lastFetch = await $.clock.now()
     const next = await collect($, root, lastFetch)
     await update($, snap, () => next)
     notifyFailures($, next)
   } finally {
     isRefreshing = false
+    if (pendingRefresh !== null) {
+      const again = pendingRefresh
+      pendingRefresh = null
+      background(refresh($, again))
+    }
   }
 }
 
-// Csak a session indulása utáni hibákra szól, mindegyikre egyszer.
+// Csak a session alatt elbukott futásokra szól (a befejezés ideje számít, nem az indulásé), mindegyikre egyszer.
 function notifyFailures($: EngineInterface, s: ProjectSnapshot): void {
   const deploy = s.netlify?.deploys[0]
-  if (deploy && deploy.state === 'error' && deploy.at > startedAt && !notified.has(`d${deploy.at}`)) {
+  if (deploy && deploy.state === 'error' && (deploy.endedAt ?? deploy.at) > startedAt && !notified.has(`d${deploy.at}`)) {
     notified.add(`d${deploy.at}`)
     $.ui.toast(t.deployFailed(deploy.branch), { timeoutMs: 10_000 })
   }
   for (const r of s.runs ?? []) {
-    if (r.conclusion === 'failure' && r.at > startedAt && !notified.has(`r${r.id}`)) {
+    if (r.conclusion === 'failure' && (r.endedAt ?? r.at) > startedAt && !notified.has(`r${r.id}`)) {
       notified.add(`r${r.id}`)
       $.ui.toast(t.runFailed(r.name), { timeoutMs: 10_000 })
     }
@@ -182,22 +213,29 @@ function notifyFailures($: EngineInterface, s: ProjectSnapshot): void {
 }
 
 async function sync($: EngineInterface, stash: boolean): Promise<void> {
-  const s = await read($, snap)
-  if (root === undefined || s === null || (await read($, busy)) !== null) return
-  const plan = planSync(s.git)
-  if (plan.kind === 'none' || plan.kind === 'diverged') return
-
-  await update($, busy, () => 'sync')
+  if (syncing) return
+  syncing = true
   try {
-    const out = await runSync($, root, plan, stash)
-    if (out.ok) $.ui.toast(t.syncDone(out.stashed === true))
-    else {
-      $.ui.toast(t.syncFailed(out.step), { timeoutMs: 10_000 })
-      await $.prompt.fill({ text: t.syncAsk(out.step, out.detail ?? ''), mode: 'replace' })
+    const s = await read($, snap)
+    if (root === undefined || s === null || (await read($, busy)) !== null) return
+    const plan = planSync(s.git)
+    if (plan.kind !== 'pull' && plan.kind !== 'switch') return
+
+    await update($, busy, () => 'sync')
+    try {
+      const out = await runSync($, root, plan, stash, s.git.branch)
+      if (out.ok) $.ui.toast(t.syncDone(out.stashedFrom))
+      else {
+        $.ui.toast(t.syncFailed(out.step, out.stashedFrom), { timeoutMs: 10_000 })
+        // A promptba írt, félbehagyott szöveget nem írjuk felül: hozzáfűzzük.
+        await $.prompt.fill({ text: t.syncAsk(out.step, out.detail ?? '', out.stashedFrom), mode: 'append' })
+      }
+    } finally {
+      await update($, busy, () => null)
+      await refresh($, true)
     }
   } finally {
-    await update($, busy, () => null)
-    await refresh($, true)
+    syncing = false
   }
 }
 
@@ -225,6 +263,10 @@ export const register: Register = (on, options) => {
     startedAt = await $.clock.now()
     root = await repoRoot($)
 
+    // Az időzítők repón kívül indított sessionben is futnak: ha később repóba lépünk, onnan frissítenek.
+    $.clock.every(REFRESH_MS, () => background(refresh($)))
+    $.clock.every(FETCH_MS, () => background(refresh($, true)))
+
     const saved = (await $.store.get('isOn')) !== false
     await update($, isOn, () => saved)
     await $.command.register({
@@ -243,8 +285,6 @@ export const register: Register = (on, options) => {
       }))
     }
     background(refresh($, true))
-    $.clock.every(REFRESH_MS, () => background(refresh($)))
-    $.clock.every(FETCH_MS, () => background(refresh($, true)))
 
     return started
   })
@@ -309,6 +349,7 @@ export const register: Register = (on, options) => {
 
           {plan.kind === 'none' && <Text color="green">{t.upToDate}</Text>}
           {plan.kind === 'diverged' && <Text color="red">{t.diverged(plan.ahead, plan.behind)}</Text>}
+          {plan.kind === 'detached' && <Text color="yellow">{t.detached}</Text>}
           {(plan.kind === 'pull' || plan.kind === 'switch') && (
             <Box flexDirection="column">
               <Text color="yellow">

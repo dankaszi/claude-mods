@@ -25,10 +25,15 @@ const hu = {
   dirtyBlocks: 'Előbb commitold a módosításokat, vagy tedd félre őket:',
   stashSync: 'Stash + szinkron',
   syncing: '⏳ szinkronizálás…',
-  syncDone: (stashed: boolean) => `Szinkron kész${stashed ? ' (a módosítások: git stash list)' : ''}`,
-  syncFailed: (step: string) => `Szinkron sikertelen (${step}) — a részletek a promptban`,
-  syncAsk: (step: string, detail: string) =>
-    `A projekt-panel szinkronja elakadt a(z) "${step}" lépésnél:\n\n${detail}\n\nNézd meg, mi a gond, és javasolj megoldást.`,
+  syncDone: (stashedFrom?: string) =>
+    `Szinkron kész${stashedFrom === undefined ? '' : ` — a módosításaid a stash-ben: git switch ${stashedFrom} && git stash pop`}`,
+  syncFailed: (step: string, stashedFrom?: string) =>
+    `Szinkron sikertelen (${step})${stashedFrom === undefined ? '' : ', a módosításaid a stash-ben'} — a részletek a promptban`,
+  syncAsk: (step: string, detail: string, stashedFrom?: string) =>
+    `A projekt-panel szinkronja elakadt a(z) "${step}" lépésnél:\n\n${detail}\n\n` +
+    (stashedFrom === undefined ? '' : `A commitolatlan módosítások a stash-ben vannak (a ${stashedFrom} branch-ről; git stash list), nem vesztek el. Csak a ${stashedFrom} branch-en állítsd vissza őket (git stash pop).\n\n`) +
+    'Nézd meg, mi a gond, és javasolj megoldást.',
+  detached: '⚠ leválasztott HEAD (nem branch-en vagy) — a szinkron gomb itt nem fut, előbb válts branch-re',
   deploy: 'DEPLOY (Netlify)',
   netlifyNoCli: 'Netlify CLI kell: npm i -g netlify-cli && netlify login',
   netlifyError: 'Nem sikerült lekérni (netlify login?)',
@@ -87,10 +92,15 @@ const en: Strings = {
   dirtyBlocks: 'Commit your changes first, or set them aside:',
   stashSync: 'Stash + sync',
   syncing: '⏳ syncing…',
-  syncDone: stashed => `Sync done${stashed ? ' (your changes: git stash list)' : ''}`,
-  syncFailed: step => `Sync failed (${step}) — details in the prompt`,
-  syncAsk: (step, detail) =>
-    `The project pane's sync stopped at "${step}":\n\n${detail}\n\nLook into it and suggest a fix.`,
+  syncDone: stashedFrom =>
+    `Sync done${stashedFrom === undefined ? '' : ` — your changes are stashed: git switch ${stashedFrom} && git stash pop`}`,
+  syncFailed: (step, stashedFrom) =>
+    `Sync failed (${step})${stashedFrom === undefined ? '' : ', your changes are stashed'} — details in the prompt`,
+  syncAsk: (step, detail, stashedFrom) =>
+    `The project pane's sync stopped at "${step}":\n\n${detail}\n\n` +
+    (stashedFrom === undefined ? '' : `The uncommitted changes are in the stash (from branch ${stashedFrom}; git stash list), not lost. Restore them only on ${stashedFrom} (git stash pop).\n\n`) +
+    'Look into it and suggest a fix.',
+  detached: '⚠ detached HEAD (not on a branch) — the sync button does not run here; switch to a branch first',
   deploy: 'DEPLOY (Netlify)',
   netlifyNoCli: 'Needs the Netlify CLI: npm i -g netlify-cli && netlify login',
   netlifyError: 'Could not fetch (netlify login?)',
