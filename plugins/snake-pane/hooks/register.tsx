@@ -108,7 +108,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'game') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   // Promptküldéskor nyílik: ez a person saját lépése, így keskeny terminálon is helyet kap.
   on('prompt.submit', async ($, e, next) => {
@@ -117,7 +117,7 @@ export const register: Register = (on, options) => {
       background($.ui.open({ id: PANE, title: t().title }))
     }
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   // Csak a fő ciklus turnje számít: egy háttérágens turnje után különben beragadna a „dolgozik”.
   on('turn.start', async ($, e, next) => {
@@ -134,7 +134,7 @@ export const register: Register = (on, options) => {
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && e.origin.kind === 'person') dismissed = true
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   // A kígyó új rekordja: tartósan mentjük, és visszaadjuk neki a props-ban.
   on('ui.message', async ($, e) => {

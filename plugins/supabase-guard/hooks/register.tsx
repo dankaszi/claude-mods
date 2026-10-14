@@ -221,7 +221,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'supabase') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   // Supabase MCP eszközök (bármelyik szerveren, aminek a nevében szerepel a „supabase”).
   on('tool.call', async ($, e, next) => {

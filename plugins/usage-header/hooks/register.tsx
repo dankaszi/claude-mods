@@ -288,7 +288,7 @@ export const register: Register = (on, options) => {
       if (e.value.on) await refresh($).catch(() => undefined)
     }
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   // Turn végén és limitmozduláskor: a bontás a helyi becslés ('summary'), API-hívás nélkül.
   on('session.measure', async ($, e, next) => {
