@@ -10,7 +10,7 @@
     {
       "name": "usage-band",
       "description": "Státuszsor: modell, kontextusablak, 5 órás és heti limit reset idővel, figyelmeztetés 90% felett. Magyar/angol. /limitsav be|ki.",
-      "version": "0.6.1",
+      "version": "0.6.2",
       "author": {
         "name": "Szota Szabolcs",
         "email": "szota.szabolcs@gmail.com"
@@ -20,7 +20,7 @@
     },
     {
       "name": "usage-header",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": "Sáv a prompt fölött: a kontextusablak kategóriánként színes sávban (rendszerprompt, eszközök, memória, üzenetek, szabad hely…), alatta az 5 órás és a heti limit színes sávval és reset idővel. /hasznalat be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",

@@ -1,6 +1,6 @@
 {
   "name": "usage-header",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Band above the prompt: context window broken down by category in colours, plus the 5-hour and weekly limits. Hungarian or English.",
   "types": "./types/index.d.ts",
   "author": {
