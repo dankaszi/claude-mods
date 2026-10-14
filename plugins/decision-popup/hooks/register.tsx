@@ -102,7 +102,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'decision') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)

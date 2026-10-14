@@ -300,7 +300,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'project') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   // Claude futtathatott git/gh parancsot: a turn végén frissítünk (fetch nélkül, az olcsó).
   on('turn.complete', async ($, e, next) => {

@@ -254,14 +254,14 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'limits') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   on('classic.PostModelSwitch', async ($, e, next) => {
     const result = await next(e)
     await refreshModel($)
     await pushStatus($)
     return result
-  })
+  }).catch(($, e, next) => next(e))
 
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('context')) {

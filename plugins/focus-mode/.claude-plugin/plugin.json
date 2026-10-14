@@ -1,6 +1,6 @@
 {
   "name": "focus-mode",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Focus mode: hides tool calls, intermediate text, your prompts and command output; shows only a subtask list with progress bars and the final answer. /fokusz toggles. Hungarian or English.",
   "types": "./types/index.d.ts",
   "author": {

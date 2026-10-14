@@ -331,7 +331,7 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'pushguard') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (!(await read($, isOn))) return next(e)

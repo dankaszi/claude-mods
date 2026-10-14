@@ -149,14 +149,14 @@ export const register: Register = (on, options) => {
     const done = await next(e)
     if (e.value?.tool === 'focus') await setOn($, e.value.on)
     return done
-  })
+  }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: PLAN_TOOL }, async ($, e) => {
     const list = parseTasks(e.tasks)
     await update($, tasks, () => list)
     const done = list.filter(task => task.status === 'done').length
     return { result: `Plan updated: ${done}/${list.length} done.` }
-  })
+  }).catch(() => ({ result: 'Plan not updated: focus-mode could not read it.' }))
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
