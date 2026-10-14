@@ -10,7 +10,7 @@
     {
       "name": "usage-band",
       "description": "Státuszsor: modell, kontextusablak, 5 órás és heti limit reset idővel, figyelmeztetés 90% felett. Magyar/angol. /limitsav be|ki.",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "author": {
         "name": "Szota Szabolcs",
         "email": "szota.szabolcs@gmail.com"
@@ -20,7 +20,7 @@
     },
     {
       "name": "usage-header",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Sáv a prompt fölött: a kontextusablak kategóriánként színes sávban (rendszerprompt, eszközök, memória, üzenetek, szabad hely…), alatta az 5 órás és a heti limit színes sávval és reset idővel. /hasznalat be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
@@ -31,7 +31,7 @@
     },
     {
       "name": "project-pane",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "description": "Oldalpanel az aktuális repóhoz: git állapot egygombos GitHub-szinkronnal, Netlify deploy, PR-ek és CI, Supabase projekt. Magyar/angol. /project be|ki.",
       "author": {
         "name": "Szota Szabolcs",
@@ -64,7 +64,7 @@
     },
     {
       "name": "snake-pane",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Kígyó játék az oldalpanelben, amíg Claude dolgozik: promptküldéskor nyílik, a turn végén szünetel, rekordot ment. /jatek be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
@@ -75,7 +75,7 @@
     },
     {
       "name": "supabase-guard",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Supabase-őr: megállítja a nem az aktuális mappa projektjére menő Supabase-hívásokat (MCP és CLI), romboló SQL, branch-reset és projekt-szüneteltetés előtt egygombos felugróban rákérdez; más projekt olvasásakor figyelmezteti a modellt. /supaor be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
@@ -86,7 +86,7 @@
     },
     {
       "name": "public-repo-guard",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Push-őr: nyilvános GitHub-repóba push (vagy nyilvánossá tétel) előtt átnézi, mi menne ki: Supabase projekt-ID, kulcsok, tokenek, e-mailek, helyi útvonalak, privát repónevek, .env fájlok; találat esetén egygombos felugróban kérdez. /pushor be|ki|figyel <szöveg>. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
@@ -97,7 +97,7 @@
     },
     {
       "name": "decision-popup",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Döntési felugró: Claude minden döntést (engedélyezés, A vagy B, visszafordíthatatlan lépés) egygombos kérdésként tesz fel, keretes felugróban; az őr-modok kérdése piros keretet kap. /dontes be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",

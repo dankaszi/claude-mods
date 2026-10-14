@@ -100,3 +100,44 @@ test('/limitsav ki: üres státuszsor, be: újra kiírja', HU, async ($, on) => 
   await $.command.run({ command: 'limitsav', args: 'be' } as never)
   expect(s.last()).toContain('Ctx')
 })
+
+test('a reset időpont a gép időzónájában (TZ), nem UTC-ben', HU, async ($, on) => {
+  const s = engine(on)
+  on('env.get', ($, e) => ({ value: e.name === 'TZ' ? 'Europe/Budapest' : undefined }))
+  on('session.start', ($, e) => e as never)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+  await $.session.start({ cwd: '/x', surface: 'terminal', isInteractive: true } as never)
+  await $.session.measure({
+    context: {} as never,
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 34, resetsAt: '2026-10-05T14:20:00Z' },
+      { kind: 'seven_day', percentUsed: 50, resetsAt: '2026-10-11T23:30:00Z' },
+    ],
+    changed: ['rateLimits'],
+  })
+  // nyári idő (UTC+2): 14:20 → 16:20; vasárnap 23:30 UTC → hétfő 01:30
+  expect(s.last()).toContain('5h ███░░░░░ 34% → 16:20')
+  expect(s.last()).toContain('Hét ████░░░░ 50% → H 01:30')
+})
+
+test('TZ nélkül a /etc/localtime linkből, végül a date +%z eltéréséből', HU, async ($, on) => {
+  const s = engine(on)
+  on('process.run', ($, e) => {
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (e.argv[0] === 'readlink') return out('', 1)
+    if (e.argv[0] === 'date') return out('-0500\n')
+    return out('', 1)
+  })
+  on('session.start', ($, e) => e as never)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+  await $.session.start({ cwd: '/x', surface: 'terminal', isInteractive: true } as never)
+  await $.session.measure({ context: {} as never, rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-05T14:20:00Z' }], changed: ['rateLimits'] })
+  expect(s.last()).toContain('→ 09:20')
+})
+
+test('89,6% már 90%-nak látszik, és ⚠-t is kap', HU, async ($, on) => {
+  const s = engine(on)
+  await $.session.measure({ context: {} as never, rateLimits: [{ kind: 'seven_day', percentUsed: 89.6, resetsAt: '2026-10-09T08:00:00Z' }], changed: ['rateLimits'] })
+  expect(s.last()).toContain('90% ⚠')
+  expect(s.toasts.length).toBe(1)
+})

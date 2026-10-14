@@ -6,14 +6,16 @@ const ROOT = '/work/shop'
 const HU = { options: { language: 'hu' } }
 const NOW = Date.parse('2026-10-05T12:00:00Z')
 
-type Fixture = Record<string, { exitCode?: number; stdout?: string; stderr?: string }>
+type Out = { exitCode?: number; stdout?: string; stderr?: string }
+// Egy kulcs értéke függvény is lehet, ha a kimenet hívásról hívásra változik (pl. a stash teteje).
+type Fixture = Record<string, Out | (() => Out)>
 
 // Tipikus elavult klón: régi develop, a main 13 committal előrébb, 7 módosított fájl.
 const STALE: Fixture = {
   'git rev-parse --show-toplevel': { stdout: ROOT },
   'git fetch --quiet origin': {},
   'git remote get-url origin': { stdout: 'https://github.com/acme/shop.git' },
-  'git status --porcelain=2 --branch': {
+  'git --no-optional-locks status --porcelain=2 --branch': {
     stdout: ['# branch.oid abc', '# branch.head develop', '# branch.upstream origin/develop', '# branch.ab +0 -0',
       ...Array.from({ length: 7 }, (_, i) => `1 .M N... 100644 100644 100644 a b f${i}.ts`)].join('\n'),
   },
@@ -24,7 +26,7 @@ const STALE: Fixture = {
     stdout: JSON.stringify([{ number: 142, title: 'Stripe webhook retry', headRefName: 'fix/x', url: 'u',
       reviewDecision: 'APPROVED', statusCheckRollup: [{ status: 'COMPLETED', conclusion: 'SUCCESS' }] }]),
   },
-  'gh run list -L 5 --json databaseId,name,headBranch,status,conclusion,createdAt,url -R acme/shop': {
+  'gh run list -L 5 --json databaseId,name,headBranch,status,conclusion,createdAt,updatedAt,url -R acme/shop': {
     stdout: JSON.stringify([{ databaseId: 7, name: 'netlify-deploy-verify', headBranch: 'main', status: 'completed',
       conclusion: 'failure', createdAt: '2026-09-30T06:00:34Z', url: 'https://github.com/run/7' }]),
   },
@@ -40,6 +42,7 @@ function engine(on: On, fixture: Fixture, waitReason?: string) {
   const ran: string[] = []
   const prompts: string[] = []
   const toasts: string[] = []
+  const modes: string[] = []
   mock.env(on, { LANG: 'hu_HU.UTF-8' })
   mock.store(on)
   mock.clock(on, { now: NOW })
@@ -49,7 +52,7 @@ function engine(on: On, fixture: Fixture, waitReason?: string) {
   on('ui.open', () =>
     ({ value: waitReason === undefined ? { isPlaced: true } : { isPlaced: false, reason: waitReason } }) as never)
   on('ui.toast', ($, e) => { toasts.push(e.text); return { value: undefined } })
-  on('prompt.fill', ($, e) => { prompts.push(e.text); return { isFilled: true } as never })
+  on('prompt.fill', ($, e) => { prompts.push(e.text); modes.push(e.mode ?? ''); return { isFilled: true } as never })
   on('fs.read', ($, e) => (e.path in FILES ? { value: FILES[e.path]! } : ({ deny: 'ENOENT' }) as never))
   on('fs.exists', ($, e) => ({ value: e.path.endsWith('netlify.toml') }))
   on('fs.list', () => ({ value: [{ name: '001_init.sql', kind: 'file' }, { name: '018_rls.sql', kind: 'file' }] }) as never)
@@ -57,11 +60,12 @@ function engine(on: On, fixture: Fixture, waitReason?: string) {
     const key = e.argv.join(' ')
     ran.push(key)
     if (e.argv[0] === 'netlify') return { deny: 'spawn netlify ENOENT' } as never
-    const hit = fixture[key] ?? { exitCode: 1, stderr: `unexpected: ${key}` }
+    const entry = fixture[key]
+    const hit = (typeof entry === 'function' ? entry() : entry) ?? { exitCode: 1, stderr: `unexpected: ${key}` }
     return { value: { exitCode: hit.exitCode ?? 0, stdout: hit.stdout ?? '', stderr: hit.stderr ?? '',
       isStdoutTruncated: false, isStderrTruncated: false } } as never
   })
-  return { ran, prompts, toasts }
+  return { ran, prompts, toasts, modes }
 }
 
 async function start($: Engine) {
@@ -113,7 +117,7 @@ test('stash + szinkron: félreteszi, átvált, fast-forward', HU, async ($, on) 
 test('tiszta, lemaradt branch: egyszerű pull', HU, async ($, on) => {
   const { ran } = engine(on, {
     ...STALE,
-    'git status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3' },
+    'git --no-optional-locks status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3' },
     'git rev-list --left-right --count HEAD...origin/main': { stdout: '0\t3' },
     'git pull --ff-only': {},
   })
@@ -129,7 +133,7 @@ test('tiszta, lemaradt branch: egyszerű pull', HU, async ($, on) => {
 test('sikertelen szinkron: a hibát a promptba teszi', HU, async ($, on) => {
   const { prompts } = engine(on, {
     ...STALE,
-    'git status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3' },
+    'git --no-optional-locks status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -3' },
     'git rev-list --left-right --count HEAD...origin/main': { stdout: '0\t3' },
     'git pull --ff-only': { exitCode: 128, stderr: 'fatal: Not possible to fast-forward' },
   })
@@ -143,7 +147,7 @@ test('sikertelen szinkron: a hibát a promptba teszi', HU, async ($, on) => {
 test('naprakész: nincs szinkron gomb; angolul', { options: { language: 'en' } }, async ($, on) => {
   engine(on, {
     ...STALE,
-    'git status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0' },
+    'git --no-optional-locks status --porcelain=2 --branch': { stdout: '# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0' },
     'git rev-list --left-right --count HEAD...origin/main': { stdout: '0\t0' },
   })
   await start($)
@@ -181,4 +185,69 @@ test('/project ki: bezárja a panelt és nem frissít; /project be: újra nyitja
   await $.command.run({ command: 'project', args: 'valami' } as never)
   expect(s.ran.length).toBe(before)
   expect((await $.command.run({ command: 'project', args: 'be' } as never)).text).toBe('Projekt-panel megnyitva.')
+})
+
+test('leválasztott HEAD: nincs szinkron gomb, nem vált el a commitoktól', HU, async ($, on) => {
+  const { ran } = engine(on, {
+    ...STALE,
+    'git --no-optional-locks status --porcelain=2 --branch': { stdout: '# branch.oid abc\n# branch.head (detached)' },
+    'git rev-list --left-right --count HEAD...origin/main': { stdout: '1\t13' },
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'project-pane', surface: 'terminal', ...PANE })
+  expect(await ui.find({ type: 'Text', text: /leválasztott HEAD/ })).toBeDefined()
+  expect(await ui.find({ key: 'sync' })).toBeUndefined()
+  expect(await ui.find({ key: 'stash-sync' })).toBeUndefined()
+  expect(ran.some(c => c.startsWith('git switch'))).toBe(false)
+  await ui.unmount()
+})
+
+test('dupla gombnyomás: egyetlen szinkron', HU, async ($, on) => {
+  const { ran } = engine(on, {
+    ...STALE,
+    'git stash push --include-untracked -m project-pane sync 2026-10-05T12:00': {},
+    'git switch main': {},
+    'git merge --ff-only origin/main': {},
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'project-pane', surface: 'terminal', ...PANE })
+  await Promise.all([ui.press({ key: 'stash-sync' }), ui.press({ key: 'stash-sync' })])
+  expect(ran.filter(c => c.startsWith('git stash push')).length).toBe(1)
+  expect(ran.filter(c => c === 'git switch main').length).toBe(1)
+  await ui.unmount()
+})
+
+test('stash után elbukott szinkron: megmondja, hol vannak a módosítások, és nem írja felül a promptot', HU, async ($, on) => {
+  let stashTop = 'aaa'
+  const { prompts, toasts, modes } = engine(on, {
+    ...STALE,
+    'git rev-parse -q --verify refs/stash': () => ({ stdout: stashTop }),
+    'git stash push --include-untracked -m project-pane sync 2026-10-05T12:00': () => {
+      stashTop = 'bbb'
+      return {}
+    },
+    'git switch main': { exitCode: 1, stderr: 'error: cannot switch' },
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'project-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'stash-sync' })
+  expect(toasts.some(x => /stash-ben/.test(x))).toBe(true)
+  expect(prompts.at(-1)).toContain('a develop branch-ről')
+  expect(modes.at(-1)).toBe('append')
+  await ui.unmount()
+})
+
+test('üres stash: nem állítja, hogy félretett valamit', HU, async ($, on) => {
+  const { toasts } = engine(on, {
+    ...STALE,
+    'git rev-parse -q --verify refs/stash': { stdout: 'aaa' },
+    'git stash push --include-untracked -m project-pane sync 2026-10-05T12:00': { stdout: 'No local changes to save' },
+    'git switch main': {},
+    'git merge --ff-only origin/main': {},
+  })
+  await start($)
+  const ui = await $.ui.mount({ plugin: 'project-pane', surface: 'terminal', ...PANE })
+  await ui.press({ key: 'stash-sync' })
+  expect(toasts).toContain('Szinkron kész')
+  await ui.unmount()
 })

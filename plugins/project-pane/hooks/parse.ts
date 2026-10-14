@@ -9,7 +9,7 @@ export function json<T>(text: string): T | undefined {
 }
 
 export function githubSlug(remoteUrl: string): string | undefined {
-  const m = /github\.com[:/]([^/]+)\/([^/]+?)(\.git)?\/?$/.exec(remoteUrl)
+  const m = /github\.com(?::\d+)?[:/]([^/]+)\/([^/]+?)(\.git)?\/?$/.exec(remoteUrl)
   return m ? `${m[1]}/${m[2]}` : undefined
 }
 
@@ -44,8 +44,14 @@ export function checksOf(rollup: GhCheck[] = []): ProjectPr['checks'] {
   return 'pass'
 }
 
+// Egy CLI néha 0-s kilépéssel is hibaobjektumot ír ki: csak tömböt fogadunk el.
+function list<T>(out: string): T[] | undefined {
+  const value = json<unknown>(out)
+  return Array.isArray(value) ? (value as T[]) : undefined
+}
+
 export function mapPrs(out: string): ProjectPr[] | undefined {
-  return json<GhPr[]>(out)?.map(p => ({
+  return list<GhPr>(out)?.map(p => ({
     number: p.number, title: p.title, branch: p.headRefName, url: p.url,
     review: p.reviewDecision || undefined, checks: checksOf(p.statusCheckRollup),
   }))
@@ -53,21 +59,23 @@ export function mapPrs(out: string): ProjectPr[] | undefined {
 
 type GhRun = {
   databaseId: number; name: string; headBranch: string; status: string
-  conclusion?: string; createdAt: string; url: string
+  conclusion?: string; createdAt: string; updatedAt?: string; url: string
 }
 
 export function mapRuns(out: string): ProjectRun[] | undefined {
-  return json<GhRun[]>(out)?.map(x => ({
+  return list<GhRun>(out)?.map(x => ({
     id: x.databaseId, name: x.name, branch: x.headBranch, status: x.status,
     conclusion: x.conclusion || undefined, at: Date.parse(x.createdAt), url: x.url,
+    endedAt: x.updatedAt === undefined ? undefined : Date.parse(x.updatedAt),
   }))
 }
 
-type NlDeploy = { state: string; branch: string; created_at: string; deploy_ssl_url?: string }
+type NlDeploy = { state: string; branch: string; created_at: string; updated_at?: string; deploy_ssl_url?: string }
 
 export function mapDeploys(out: string): ProjectDeploy[] {
-  return (json<NlDeploy[]>(out) ?? []).slice(0, 3).map(d => ({
+  return (list<NlDeploy>(out) ?? []).slice(0, 3).map(d => ({
     state: d.state, branch: d.branch, at: Date.parse(d.created_at), url: d.deploy_ssl_url,
+    endedAt: d.updated_at === undefined ? undefined : Date.parse(d.updated_at),
   }))
 }
 
@@ -76,9 +84,12 @@ export type SyncPlan =
   | { kind: 'pull'; commits: number }
   | { kind: 'switch'; to: string; commits: number }
   | { kind: 'diverged'; ahead: number; behind: number }
+  | { kind: 'detached' }
 
 // Csak fast-forward: a gomb soha nem merge-öl, nem rebase-el és nem dob el commitot.
 export function planSync(git: ProjectGit): SyncPlan {
+  // Leválasztott HEAD-ről elváltva az ott készült commitok elárvulnának: ide nem nyúlunk.
+  if (git.branch === '(detached)') return { kind: 'detached' }
   if (git.behind > 0 && git.ahead > 0) return { kind: 'diverged', ahead: git.ahead, behind: git.behind }
   if (git.behind > 0) return { kind: 'pull', commits: git.behind }
   if (git.branch !== git.defaultBranch && git.behindDefault > 0) {

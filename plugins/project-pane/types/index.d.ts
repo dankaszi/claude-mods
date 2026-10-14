@@ -28,10 +28,12 @@ export type ProjectRun = {
   status: string
   conclusion?: string
   at: number
+  /** When the run last changed (finished): failure toasts compare this to the session start. */
+  endedAt?: number
   url: string
 }
 
-export type ProjectDeploy = { state: string; branch: string; at: number; url?: string }
+export type ProjectDeploy = { state: string; branch: string; at: number; endedAt?: number; url?: string }
 
 export type ProjectNetlify = {
   siteId: string

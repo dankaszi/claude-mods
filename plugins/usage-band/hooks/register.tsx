@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionContextUsage } from 'claude-code'
 
 import type { Context, Limit } from '../types'
+import { UTC, localZone, wallClock } from './time'
+import type { Zone } from './time'
 
 const limits = atom({ plugin: 'usage-band', key: 'limits' } as const, [])
 // Ablak + reset párosok, amikre már szóltunk: így egy ablakra resetenként egyszer jön toast.
@@ -38,6 +40,7 @@ const STRINGS: Record<'hu' | 'en', Strings> = {
 
 // A modul minden beállításváltáskor újratöltődik, így elég egyszer, induláskor eldönteni.
 let t: Strings = STRINGS.en
+let zone: Zone = UTC
 const LABELS = (): Record<string, string> => t.labels
 const WIDTH = 8
 
@@ -46,14 +49,15 @@ function bar(percent: number): string {
   return '█'.repeat(filled) + '░'.repeat(WIDTH - filled)
 }
 
-const warnMark = (percent: number) => (percent >= WARN_AT ? ' ⚠' : '')
+// A kiírt (kerekített) értékhez mérünk: ami 90%-nak látszik, az ⚠-t is kap.
+const atWarn = (percent: number) => Math.round(percent) >= WARN_AT
+const warnMark = (percent: number) => (atWarn(percent) ? ' ⚠' : '')
 
 function resetText(kind: string, resetsAt?: string): string {
   if (resetsAt === undefined) return ''
-  const at = new Date(resetsAt)
-  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
+  const { day, hhmm } = wallClock(new Date(resetsAt), zone)
   if (kind === 'five_hour') return ` → ${hhmm}`
-  return ` → ${t.days[at.getDay()]} ${hhmm}`
+  return ` → ${t.days[day]} ${hhmm}`
 }
 
 function tokens(n: number): string {
@@ -96,9 +100,12 @@ async function pushStatus($: EngineInterface): Promise<void> {
 }
 
 async function warnPast90($: EngineInterface, current: Limit[]): Promise<void> {
+  // Ami visszaesett 90% alá, arra újra szólhatunk (akkor is, ha nincs reset időpontja).
+  const below = new Set(current.filter(l => !atWarn(l.percentUsed)).map(l => `${l.kind}@${l.resetsAt}`))
+  if ((await read($, warned)).some(k => below.has(k))) await update($, warned, list => list.filter(k => !below.has(k)))
   const already = await read($, warned)
   const fresh = current.filter(
-    l => l.kind in LABELS() && l.percentUsed >= WARN_AT && !already.includes(`${l.kind}@${l.resetsAt}`),
+    l => l.kind in LABELS() && atWarn(l.percentUsed) && !already.includes(`${l.kind}@${l.resetsAt}`),
   )
   if (fresh.length === 0) return
 
@@ -129,6 +136,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     t = await pickLanguage($, options.language)
     const result = await next(e)
+    zone = await localZone($)
     const saved = (await $.store.get('isOn')) !== false
     await update($, isOn, () => saved)
     await $.command.register({ name: 'limitsav', description: t.command, argumentHint: t === STRINGS.hu ? '[be|ki]' : '[on|off]', immediate: true })

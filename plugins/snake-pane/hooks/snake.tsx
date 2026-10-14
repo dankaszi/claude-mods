@@ -18,6 +18,8 @@ type Game = {
   food: Cell
   score: number
   best: number
+  // A játék indulásakor érvényes rekord: az „új rekord!” ehhez mér (holtverseny nem rekord).
+  startBest: number
   phase: Phase
   lastCmd: number
   wasWorking: boolean
@@ -66,6 +68,7 @@ function newGame(props: SnakeProps, prev?: Game): Game {
   const y = Math.floor(h / 2)
   const x = Math.floor(w / 3)
   const snake: Cell[] = [[x, y], [x - 1, y], [x - 2, y]]
+  const best = Math.max(props.best, prev?.best ?? 0)
   return {
     w,
     h,
@@ -74,11 +77,19 @@ function newGame(props: SnakeProps, prev?: Game): Game {
     queue: [],
     food: placeFood(w, h, snake),
     score: 0,
-    best: Math.max(props.best, prev?.best ?? 0),
+    best,
+    startBest: best,
     phase: 'ready',
     lastCmd: prev?.lastCmd ?? props.cmd?.n ?? 0,
     wasWorking: props.working,
   }
+}
+
+// A panel átméretezése: ha a kígyó és az étel befér, helyben marad; különben új játék indul.
+function resize(g: Game, props: SnakeProps): Game {
+  const fits = (c: Cell) => c[0] < props.w && c[1] < props.h
+  if (g.phase === 'ready' || g.phase === 'over' || !g.snake.every(fits)) return { ...newGame(props, g), lastCmd: g.lastCmd, wasWorking: g.wasWorking }
+  return { ...g, w: props.w, h: props.h, food: fits(g.food) ? g.food : placeFood(props.w, props.h, g.snake) }
 }
 
 function step(g: Game): { game: Game; record?: number } {
@@ -89,19 +100,23 @@ function step(g: Game): { game: Game; record?: number } {
   const body = eats ? g.snake : g.snake.slice(0, -1)
   const dead = head[0] < 0 || head[1] < 0 || head[0] >= g.w || head[1] >= g.h || body.some(c => same(c, head))
   if (dead) {
-    const record = g.score > g.best ? g.score : undefined
-    return { game: { ...g, dir: dir!, queue: [], phase: 'over', best: Math.max(g.best, g.score) }, record }
+    return { game: { ...g, dir: dir!, queue: [], phase: 'over', best: Math.max(g.best, g.score) } }
   }
   const snake = [head, ...body]
+  const score = eats ? g.score + 1 : g.score
+  // A rekordot menet közben mentjük: ha a panel bezárul vagy a session véget ér, sem vész el.
+  const record = eats && score > g.best ? score : undefined
   return {
     game: {
       ...g,
       dir: dir!,
       queue,
       snake,
-      score: eats ? g.score + 1 : g.score,
+      score,
+      best: Math.max(g.best, score),
       food: eats ? placeFood(g.w, g.h, snake) : g.food,
     },
+    record,
   }
 }
 
@@ -134,12 +149,14 @@ function toCmd(event: ClientKeyEvent): SnakeCmd | undefined {
 // Pluginonként egy példány fut, így a legutóbbi props modulszinten tartható: az óra és a
 // billentyűfigyelő az első hívásban indul, de mindig a friss méretet és rekordot látja.
 let latest: SnakeProps | undefined
+// Az első képkocka ugyanazt a játékot rajzolja, amit a setState elment (különben az étel ugrana).
+let initial: Game | undefined
 
 const Snake: ClientModule<SnakeProps, Game> = (props, surface) => {
   const { Box, Text } = surface.elements
   const t = STRINGS[props.lang]
   latest = props
-  const current = () => surface.state ?? newGame(latest ?? props)
+  const current = () => surface.state ?? (initial ??= newGame(latest ?? props))
 
   if (surface.state === undefined) {
     // A képkocka-számláló nem állapot: csak a lépés rajzol újra, a köztes képkocka nem.
@@ -157,7 +174,7 @@ const Snake: ClientModule<SnakeProps, Game> = (props, surface) => {
       const cmd = toCmd(event)
       if (cmd !== undefined) surface.setState(apply(current(), cmd, latest ?? props))
     })
-    surface.setState(newGame(props))
+    surface.setState(current())
   }
 
   let g = current()
@@ -169,6 +186,10 @@ const Snake: ClientModule<SnakeProps, Game> = (props, surface) => {
   }
   if (g.wasWorking !== props.working) {
     g = { ...g, wasWorking: props.working, ...(!props.working && g.phase === 'run' ? { phase: 'pause', notice: 'done' } : {}) }
+    changed = true
+  }
+  if (props.w !== g.w || props.h !== g.h) {
+    g = resize(g, props)
     changed = true
   }
   if (props.best > g.best) {
@@ -205,7 +226,7 @@ const Snake: ClientModule<SnakeProps, Game> = (props, surface) => {
   const message =
     g.phase === 'ready' ? t.ready
     : g.phase === 'pause' ? (g.notice === 'done' ? t.done : t.paused)
-    : g.phase === 'over' ? t.over(g.score, g.score > 0 && g.score >= g.best)
+    : g.phase === 'over' ? t.over(g.score, g.score > g.startBest)
     : t.run
 
   return (

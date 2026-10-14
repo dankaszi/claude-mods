@@ -22,6 +22,10 @@ const dontes = ($: Engine, args: string) =>
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`a kérdés keretben, címmel és gombsúgóval jelenik meg (${surface})`, HU, async ($, on) => {
     mock.store(on)
+    // A Supabase-őr éppen nyitott kérdése (ezt csak az őr-mod írhatja).
+    let guardAsking: string | null = null
+    on('state.get', ($, e, next) =>
+      (e as { plugin: string }).plugin === 'supabase-guard' ? ({ value: { value: guardAsking, version: 1 } }) as never : next(e))
     on('ui.render', () => ({ type: 'engine', ref: 0 }) as never)
     const drawn = JSON.stringify(await dialog($, surface, 'Megközelítés'))
     // a beépített dialógus (engine node) a keretben marad
@@ -30,9 +34,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(drawn).toContain('1–2')
     expect(drawn).toContain('"borderStyle":"round"')
 
+    // Csak a fejléc (amit a modell is beírhat) nem tesz belőle őr-kérdést.
+    const spoofed = JSON.stringify(await dialog($, surface, 'Supabase-őr'))
+    expect(spoofed).not.toContain('Az őr megállított egy műveletet')
+    expect(spoofed).not.toContain('"borderColor":"error"')
+
+    // Az őr-mod saját, éppen nyitott kérdése piros keretet kap.
+    guardAsking = 'Mehet?'
     const guard = JSON.stringify(await dialog($, surface, 'Supabase-őr'))
     expect(guard).toContain('Az őr megállított egy műveletet')
     expect(guard).toContain('"borderColor":"error"')
+    guardAsking = null
   })
 }
 

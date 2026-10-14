@@ -65,6 +65,45 @@ test('osztályozás: SQL, eszköznevek, CLI, ref-ek', {}, async () => {
   expect(refsIn(`Supabase Project ID: \`${OWN}\``)).toEqual([OWN])
 })
 
+test('SQL: szövegkonstans, komment, al-lekérdezés, CTE nem rejti el a rombolást', {}, async () => {
+  expect(sqlRisk("select '--'; drop table users")).toBe('destructive')
+  expect(sqlRisk('drop/**/table x')).toBe('destructive')
+  expect(sqlRisk('update/**/t set a=1')).toBe('destructive')
+  expect(sqlRisk("update users set plan = (select id from plans where name='free')")).toBe('destructive')
+  expect(sqlRisk('with u as (update t set a=1 returning *) select 1')).toBe('destructive')
+  expect(sqlRisk('merge into t using s on t.id = s.id when matched then delete')).toBe('destructive')
+  for (const what of ['owned by authenticated', 'sequence s', 'domain d', 'procedure p', 'user u', 'foreign table f', 'subscription s']) {
+    expect(sqlRisk(`drop ${what}`)).toBe('destructive')
+  }
+  expect(sqlRisk('select pg_terminate_backend(pid) from pg_stat_activity')).toBe('destructive')
+  expect(sqlRisk('grant all on all tables in schema public to anon')).toBe('destructive')
+  expect(sqlRisk('create policy p on t for select using (true)')).toBe('destructive')
+  expect(sqlRisk('select * into newt from t')).toBe('write')
+  expect(sqlRisk('do $$ begin drop table x; end $$')).toBe('destructive')
+  // ami nem rombol, az nem is riaszt
+  expect(sqlRisk("insert into logs values ('truncate failed')")).toBe('write')
+  expect(sqlRisk("select 'drop table x'")).toBe('read')
+  expect(sqlRisk('select * from t where id = 1 for update')).toBe('read')
+  expect(sqlRisk('insert into t values (1) on conflict (id) do update set a = 2')).toBe('write')
+})
+
+test('CLI: npx/bunx/node_modules, --db-url, psql, link és a többi távoli parancs', {}, async () => {
+  expect(supabaseCli('npx supabase@latest db push')?.risk).toBe('write')
+  expect(supabaseCli('bunx supabase@2 db push')?.risk).toBe('write')
+  expect(supabaseCli('./node_modules/.bin/supabase db push')?.risk).toBe('write')
+  expect(supabaseCli(`supabase db push --db-url postgresql://postgres:x@db.${OTHER}.supabase.co:5432/postgres`)?.ref).toBe(OTHER)
+  expect(supabaseCli(`supabase db reset --db-url postgresql://postgres.${OTHER}:x@aws-0.pooler.supabase.com:6543/postgres`)).toEqual({ ref: OTHER, risk: 'destructive', what: 'db reset' })
+  expect(supabaseCli(`psql "postgresql://postgres:x@db.${OTHER}.supabase.co:5432/postgres" -c 'drop table x'`)).toEqual({ ref: OTHER, risk: 'destructive', what: 'psql' })
+  expect(supabaseCli(`psql "postgresql://postgres:x@db.${OTHER}.supabase.co:5432/postgres"`)?.risk).toBe('write')
+  expect(supabaseCli(`supabase link --project-ref ${OTHER}`)?.risk).toBe('write')
+  expect(supabaseCli('supabase migration down --linked')?.risk).toBe('destructive')
+  expect(supabaseCli('supabase storage rm -r ss:///bucket')?.risk).toBe('destructive')
+  expect(supabaseCli('supabase ssl-enforcement update --enable-db-ssl-enforcement')?.risk).toBe('write')
+  expect(supabaseCli('supabase migration list')?.risk).toBe('read')
+  expect(supabaseCli('cd supabase && ls')).toBe(null)
+  expect(actionRisk('merge_branch', { branch_id: 'x' })).toBe('destructive')
+})
+
 test('a mappa projektjén az olvasás és a sima írás kérdés nélkül fut', HU, async ($, on) => {
   folder(on)
   const asked = answer(on, 'Megtiltom')
@@ -144,4 +183,21 @@ test('a supabase CLI más projektre: kérdez', HU, async ($, on) => {
   const r = (await $.tool.call({ tool: 'Bash', command: `supabase db push --project-ref ${OTHER}` } as never)) as { isError?: boolean }
   expect(denied(r)).toBe(true)
   expect(asked[0]).toContain('supabase db push')
+})
+
+test('a „session végéig” engedély mappához kötött', HU, async ($, on) => {
+  let cwd = '/work/unknown'
+  const files: Record<string, string> = { [`${ROOT}/.env.local`]: `NEXT_PUBLIC_SUPABASE_URL=https://${OWN}.supabase.co\n` }
+  mock.store(on)
+  on('session.cwd', () => ({ value: cwd }))
+  on('session.repo', () => ({ value: { root: cwd, remote: null, internal: false, name: null } }))
+  on('fs.exists', (_$, e) => ({ value: e.path in files }))
+  on('fs.read', (_$, e) => ({ value: files[e.path] ?? '' }))
+  const asked = answer(on, 'Engedem a session végéig')
+  ran(on)
+  await sql($, OTHER, 'insert into t values (1)')
+  cwd = ROOT
+  await sql($, OTHER, 'insert into t values (2)')
+  expect(asked.length).toBe(2)
+  expect(asked[1]).toContain('shop')
 })

@@ -119,8 +119,9 @@ export const register: Register = (on, options) => {
     return done
   })
 
+  // Csak a fő ciklus turnje számít: egy háttérágens turnje után különben beragadna a „dolgozik”.
   on('turn.start', async ($, e, next) => {
-    await update($, working, () => true)
+    if (e.agentId === undefined) await update($, working, () => true)
     return next(e)
   })
 
