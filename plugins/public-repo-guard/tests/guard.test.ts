@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Register } from 'claude-code'
 
-import { addedLines, envFiles, githubRepo, goesPublic, parsePush, parsePushes, prefilter, scanLines } from '../hooks/scan'
+import { addedLines, envFiles, githubRepo, goesPublic, parsePush, parsePushes, prefilter, scanLines, windowsHomes } from '../hooks/scan'
 
 type On = Parameters<Register>[0]
 
@@ -265,4 +265,21 @@ test('a „jegyezd meg” repónként szól, nem mindenhol', HU, async ($, on) =
   url = 'git@github.com:me/y.git\n'
   await bash($, 'git push')
   expect(asked.length).toBe(2)
+})
+
+test('Windows-os felhasználói mappa: minden írásmódban, helyőrző nélkül', {}, async () => {
+  const user = 'La' + 'ci'
+  expect(windowsHomes(`$log = "C:\\Users\\${user}\\Documents\\x.log"`.replace(/\\\\/g, '\\'))).toEqual([`C:\\Users\\${user}`])
+  expect(windowsHomes(`"path": "C:\\\\Users\\\\${user}\\\\OneDrive"`)).toEqual([`C:\\Users\\${user}`])
+  expect(windowsHomes(`d:/Users/${user}/repo`)).toEqual([`D:\\Users\\${user}`])
+  expect(windowsHomes(`cd /c/Users/${user}/src`)).toEqual([`C:\\Users\\${user}`])
+  // helyőrzők és általános mappák nem számítanak
+  expect(windowsHomes('C:\\Users\\%USERNAME%\\x')).toEqual([])
+  expect(windowsHomes('C:\\Users\\$env:USERNAME\\x')).toEqual([])
+  expect(windowsHomes('C:\\Users\\<user>\\x')).toEqual([])
+  expect(windowsHomes('C:\\Users\\Public\\Desktop')).toEqual([])
+  const kinds = scanLines([{ file: 'a.ps1', line: 3, text: `Copy-Item C:\\Users\\${user}\\a.txt` }], { ...CTX, home: `C:\\Users\\${user}` })
+  expect(kinds.map(f => `${f.kind}:${f.value}`)).toEqual([`localPath:C:\\Users\\${user}`])
+  // az előszűrő (első push) is átengedi a sort a részletes keresésnek
+  expect(new RegExp(prefilter(`C:\\Users\\${user}`), 'i').test(`Copy-Item C:\\Users\\${user}\\a.txt`)).toBe(true)
 })

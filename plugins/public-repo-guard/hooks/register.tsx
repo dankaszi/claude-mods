@@ -220,7 +220,8 @@ async function scan($: EngineInterface, command: string): Promise<Scan | null> {
   const flip = publicTarget(command)
   if (pushes.length === 0 && flip === null) return null
 
-  const home = (await $.env.get('HOME')) ?? null
+  // Windowson a HOME gyakran nincs beállítva: ott a USERPROFILE a home.
+  const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || null
   const cwd = await $.session.cwd()
   const targets: Target[] = []
 

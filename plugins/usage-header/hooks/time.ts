@@ -18,16 +18,44 @@ function validName(name: string | undefined): string | null {
   }
 }
 
-async function out($: EngineInterface, argv: string[]): Promise<string> {
+// A Windows saját időzóna-nevei (Get-TimeZone / TimeZoneInfo.Local.Id) → IANA név, a gyakoriak.
+const WINDOWS_ZONES: Record<string, string> = {
+  'Central Europe Standard Time': 'Europe/Budapest',
+  'Central European Standard Time': 'Europe/Warsaw',
+  'W. Europe Standard Time': 'Europe/Berlin',
+  'Romance Standard Time': 'Europe/Paris',
+  'GMT Standard Time': 'Europe/London',
+  'GTB Standard Time': 'Europe/Bucharest',
+  'E. Europe Standard Time': 'Europe/Chisinau',
+  'FLE Standard Time': 'Europe/Kiev',
+  'Russian Standard Time': 'Europe/Moscow',
+  'Turkey Standard Time': 'Europe/Istanbul',
+  'UTC': 'UTC',
+  'Eastern Standard Time': 'America/New_York',
+  'Central Standard Time': 'America/Chicago',
+  'Mountain Standard Time': 'America/Denver',
+  'Pacific Standard Time': 'America/Los_Angeles',
+}
+
+// "+02:00" vagy "+0200" → percek
+function offsetMinutes(text: string): number | null {
+  const m = /^([+-])(\d\d):?(\d\d)$/.exec(text.trim())
+  if (m === null) return null
+  const minutes = Number(m[2]) * 60 + Number(m[3])
+  return m[1] === '-' ? -minutes : minutes
+}
+
+async function out($: EngineInterface, argv: string[], timeoutMs = 3_000): Promise<string> {
   try {
-    const r = await $.process.run(argv, { timeoutMs: 3_000 })
+    const r = await $.process.run(argv, { timeoutMs })
     return r.exitCode === 0 ? r.stdout.trim() : ''
   } catch {
     return ''
   }
 }
 
-// TZ, aztán a /etc/localtime link (macOS, Linux), aztán a `date +%z` eltérése.
+// TZ, aztán a /etc/localtime link (macOS, Linux), Windowson a PowerShell időzóna-neve,
+// végül az eltérés: `date +%z`, vagy Windowson a PowerShell `zzz` formátuma.
 export async function localZone($: EngineInterface): Promise<Zone> {
   const tz = await Promise.resolve($.env.get('TZ')).catch(() => undefined)
   const fromEnv = validName(tz?.replace(/^:/, ''))
@@ -35,10 +63,14 @@ export async function localZone($: EngineInterface): Promise<Zone> {
   const link = /zoneinfo\/(.+)$/.exec(await out($, ['readlink', '/etc/localtime']))?.[1]
   const fromLink = validName(link)
   if (fromLink !== null) return { name: fromLink }
-  const offset = /^([+-])(\d\d)(\d\d)$/.exec(await out($, ['date', '+%z']))
-  if (offset === null) return UTC
-  const minutes = Number(offset[2]) * 60 + Number(offset[3])
-  return { offsetMinutes: offset[1] === '-' ? -minutes : minutes }
+  const fromDate = offsetMinutes(await out($, ['date', '+%z']))
+  if (fromDate !== null) return { offsetMinutes: fromDate }
+  // Windows: egy PowerShell-hívás adja a zóna nevét és a mostani eltérést is (az indulása lassabb, ezért több idő).
+  const ps = (await out($, ['powershell', '-NoProfile', '-NonInteractive', '-Command', "[TimeZoneInfo]::Local.Id; (Get-Date).ToString('zzz')"], 8_000)).split(/\r?\n/)
+  const fromWindows = validName(WINDOWS_ZONES[ps[0]?.trim() ?? ''])
+  if (fromWindows !== null) return { name: fromWindows }
+  const fromPowerShell = offsetMinutes(ps[1] ?? '')
+  return fromPowerShell === null ? UTC : { offsetMinutes: fromPowerShell }
 }
 
 // A hét napja (0 = vasárnap) és az óra:perc a megadott időzónában.
