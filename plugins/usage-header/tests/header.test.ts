@@ -119,3 +119,14 @@ test('fókusz móddal a vonal a lista legszélesebb soráig tart', HU, async ($,
   expect(await desk.find({ type: 'Text', text: /^─{28}$/ })).toBeDefined()
   await desk.unmount()
 })
+
+test('a reset időpont a gép időzónájában (TZ)', HU, async ($, on) => {
+  engine(on)
+  on('env.get', ($, e) => ({ value: e.name === 'TZ' ? 'Europe/Budapest' : undefined }))
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true } as never)
+  const ui = await mount($, 'terminal')
+  // 14:20 UTC → 16:20 Budapesten; péntek 08:00 UTC → P 10:00
+  expect(await ui.find({ type: 'Text', text: ' → 16:20' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: ' → P 10:00' })).toBeDefined()
+  await ui.unmount()
+})

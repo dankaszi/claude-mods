@@ -2,6 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionContextBreakdown } from 'claude-code'
 
 import type { Breakdown, Limit, Segment, Task } from '../types'
+import { UTC, localZone, wallClock } from './time'
+import type { Zone } from './time'
 
 const breakdown = atom({ plugin: 'usage-header', key: 'breakdown' } as const, null)
 const limits = atom({ plugin: 'usage-header', key: 'limits' } as const, [])
@@ -110,13 +112,14 @@ export function cells(segments: Segment[], max: number, width: number): number[]
 
 const glyph = (kind: Segment['kind']) => (kind === 'used' ? '█' : kind === 'buffer' ? '▒' : '░')
 
-const levelColor = (percent: number) => (percent >= WARN_AT ? 'red' : percent >= CAUTION_AT ? 'yellow' : 'green')
+const levelColor = (percent: number) => (Math.round(percent) >= WARN_AT ? 'red' : percent >= CAUTION_AT ? 'yellow' : 'green')
+
+let zone: Zone = UTC
 
 function resetText(kind: string, resetsAt?: string): string {
   if (resetsAt === undefined) return ''
-  const at = new Date(resetsAt)
-  const hhmm = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`
-  return kind === 'five_hour' ? ` → ${hhmm}` : ` → ${t().days[at.getDay()]} ${hhmm}`
+  const { day, hhmm } = wallClock(new Date(resetsAt), zone)
+  return kind === 'five_hour' ? ` → ${hhmm}` : ` → ${t().days[day]} ${hhmm}`
 }
 
 // A fókusz mód feliratai és elrendezése (focus-mode/hooks/register.tsx): ebből jön a lista legszélesebb sora.
@@ -167,6 +170,7 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     lang = await pickLanguage($, options.language)
+    zone = await localZone($)
     const saved = (await $.store.get('isOn')) !== false
     await update($, isOn, () => saved)
     await $.command.register({ name: 'hasznalat', description: t().command, argumentHint: t().hint, immediate: true })
@@ -186,7 +190,11 @@ export const register: Register = (on, options) => {
   // Az eszköztár gombja parancs nélkül kapcsol (így nem marad parancssor a transcriptben).
   on('state.set', { plugin: 'tool-hub', key: 'request' }, async ($, e, next) => {
     const done = await next(e)
-    if (e.value?.tool === 'header') await setOn($, e.value.on).catch(() => undefined)
+    if (e.value?.tool === 'header') {
+      await setOn($, e.value.on).catch(() => undefined)
+      // Kikapcsolva nem frissültek az adatok: bekapcsoláskor azonnal frissítünk, ne régit mutasson.
+      if (e.value.on) await refresh($).catch(() => undefined)
+    }
     return done
   })
 
@@ -259,7 +267,7 @@ export const register: Register = (on, options) => {
                 <Text>{`${t().windows[l.kind]} `}</Text>
                 <Text color={color}>{'█'.repeat(filled)}</Text>
                 <Text dimColor>{'░'.repeat(limitWidth - filled)}</Text>
-                <Text color={color} bold>{` ${Math.round(l.percentUsed)}%${l.percentUsed >= WARN_AT ? ' ⚠' : ''}`}</Text>
+                <Text color={color} bold>{` ${Math.round(l.percentUsed)}%${Math.round(l.percentUsed) >= WARN_AT ? ' ⚠' : ''}`}</Text>
                 <Text dimColor>{resetText(l.kind, l.resetsAt)}</Text>
               </Box>
             )
