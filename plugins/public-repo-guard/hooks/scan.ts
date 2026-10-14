@@ -180,11 +180,12 @@ export function grepLines(output: string, rev: string | null): Line[] {
 }
 
 // Az előszűrő a `git grep`-hez: csak a gyanús sorokat kérjük le.
-export const PREFILTER = 'supabase|project[_ -]?(id|ref)|eyJ|sk_|sk-|rk_live|whsec_|wsec_|gh[pousr]_|github_pat_|AKIA|AIza|PRIVATE KEY|xox[baprs]-|re_[A-Za-z0-9]|[0-9]:AA|@|/Users/|/home/'
+export const PREFILTER = 'supabase|project[_ -]?(id|ref)|eyJ|sk_|sk-|rk_live|whsec_|wsec_|gh[pousr]_|github_pat_|AKIA|AIza|PRIVATE KEY|xox[baprs]-|re_[A-Za-z0-9]|[0-9]:AA|@|/Users/|/home/|[A-Za-z]:[\\\\/]+Users|/[a-z]/Users/'
 
 // Az előszűrő a saját home mappával kiegészítve (pl. /root vagy /srv/me sem marad ki).
+// (A Windows-os home-ot a PREFILTER Users-mintája már lefedi.)
 export function prefilter(home: string | null): string {
-  return home === null || home === '' ? PREFILTER : `${PREFILTER}|${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
+  return home === null || !home.startsWith('/') ? PREFILTER : `${PREFILTER}|${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/`
 }
 
 type Rule = { kind: string; re: RegExp; mask: boolean }
@@ -207,6 +208,24 @@ const RULES: Rule[] = [
 const HARMLESS_EMAIL = /noreply|no-reply|@users\.noreply\.github\.com$|^(git|you|user|name|someone|test|email|valaki|pelda)@|@(example|pelda|email|test|domain|ceg|company|something|your-?domain|acme)\.[a-z.]+$|@\d(?:\.\d)?x\.(?:png|jpe?g|gif|webp|avif|svg)$/i
 // Zajos, generált fájlok: ezekben nem keresünk.
 const SKIP_FILE = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|poetry\.lock|composer\.lock)$/
+
+// Windows felhasználói mappa: C:\Users\Nev, C:\\Users\\Nev (idézőjelben), C:/Users/Nev, /c/Users/Nev (Git Bash).
+// A helyőrzők (%USERNAME%, $env:USERNAME, <user>) és az általános nevek nem számítanak.
+const WINDOWS_HOME = /\b([A-Za-z]):(?:\\{1,2}|\/)+Users(?:\\{1,2}|\/)+([^\\/\s"'`<>|:*?%$;,()]+)/gi
+const GIT_BASH_HOME = /(?<![\w.])\/([a-z])\/Users\/([^/\s"'`<>|:*?%$;,()]+)/gi
+const PLACEHOLDER_USER = /^(public|default|default user|all users|user|username|users|you|your-?name|yourname|name|example|pelda|valaki|me|xy|x|\.+)$/i
+
+export function windowsHomes(text: string): string[] {
+  const found: string[] = []
+  for (const re of [WINDOWS_HOME, GIT_BASH_HOME]) {
+    for (const m of text.matchAll(re)) {
+      const user = m[2] ?? ''
+      if (user === '' || PLACEHOLDER_USER.test(user)) continue
+      found.push(`${(m[1] ?? 'C').toUpperCase()}:\\Users\\${user}`)
+    }
+  }
+  return found
+}
 
 export type Finding = { kind: string; file: string; line: number; value: string; shown: string }
 
@@ -250,7 +269,8 @@ export function scanLines(lines: readonly Line[], ctx: Context): Finding[] {
         add('supabaseRef', l, m[1] ?? '', true)
       }
     }
-    if (ctx.home !== null && l.text.includes(`${ctx.home}/`)) add('localPath', l, ctx.home, false)
+    if (ctx.home !== null && ctx.home.startsWith('/') && l.text.includes(`${ctx.home}/`)) add('localPath', l, ctx.home, false)
+    for (const home of windowsHomes(l.text)) add('localPath', l, home, false)
     const lower = l.text.toLowerCase()
     for (const repo of ctx.privateRepos) {
       if (lower.includes(repo.toLowerCase())) add('privateRepo', l, repo, false)
