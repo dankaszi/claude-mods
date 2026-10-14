@@ -68,7 +68,7 @@ async function pickLanguage($: EngineInterface, setting: unknown): Promise<Lang>
 
 const basename = (path: string) => path.replace(/\/+$/, '').split('/').pop() || path
 
-// Session szintű engedélyek (`ref|kockázat`): újratöltéskor elfelejtődnek, ez szándékos.
+// Session szintű engedélyek (`mappa|ref|kockázat`): újratöltéskor elfelejtődnek, ez szándékos.
 const allowed = new Set<string>()
 // Mappánkénti gyorsítótár, hogy ne olvassuk minden hívásnál a fájlokat.
 const cache = new Map<string, { at: number; refs: string[] }>()
@@ -86,7 +86,8 @@ async function storeObject<T extends object>($: EngineInterface, key: string): P
 async function expected($: EngineInterface): Promise<{ root: string; refs: string[] }> {
   const cwd = await $.session.cwd()
   const root = (await $.session.repo())?.root ?? cwd
-  const hit = cache.get(root)
+  const cacheKey = `${root}|${cwd}`
+  const hit = cache.get(cacheKey)
   if (hit !== undefined && Date.now() - hit.at < CACHE_MS) return { root, refs: hit.refs }
 
   const refs = new Set<string>((await storeObject<Bindings>($, 'bindings'))[root] ?? [])
@@ -100,7 +101,7 @@ async function expected($: EngineInterface): Promise<{ root: string; refs: strin
     }
   }
   const list = [...refs]
-  cache.set(root, { at: Date.now(), refs: list })
+  cache.set(cacheKey, { at: Date.now(), refs: list })
 
   // Megjegyezzük, melyik ref melyik mappáé, hogy máshol is néven nevezhessük.
   if (list.length > 0) {
@@ -133,7 +134,7 @@ async function judge($: EngineInterface, ref: string | null, risk: Risk, what: s
     return { allow: true, note: t().readNote(await label($, ref), own) }
   }
 
-  const key = `${ref ?? '?'}|${risk}`
+  const key = `${root}|${ref ?? '?'}|${risk}`
   if (allowed.has(key)) return { allow: true }
   const target = ref === null ? '?' : await label($, ref)
 
@@ -167,7 +168,7 @@ async function judge($: EngineInterface, ref: string | null, risk: Risk, what: s
   if (answer === t().bind && ref !== null) {
     const bindings = await storeObject<Bindings>($, 'bindings')
     await $.store.set('bindings', { ...bindings, [root]: [...new Set([...(bindings[root] ?? []), ref])] })
-    cache.delete(root)
+    cache.clear()
     $.ui.toast(t().bound(folder, ref))
     return { allow: true }
   }
@@ -237,6 +238,9 @@ export const register: Register = (on, options) => {
     if (cli === null || cli.risk === 'read') return next(e)
     const verdict = await judge($, cli.ref, cli.risk, `supabase ${cli.what}`)
     if (!verdict.allow) return { deny: verdict.reason }
-    return next(e)
+    const result = await next(e)
+    // A `supabase link` átírja a mappa projektjét: legközelebb újra olvassuk.
+    if (/\blink\b/.test(cli.what)) cache.clear()
+    return result
   }).catch(($, e, next) => (next.called || supabaseCli(e.command) === null ? next(e) : { deny: 'supabase-guard: the check failed, so the command was stopped.' }))
 }

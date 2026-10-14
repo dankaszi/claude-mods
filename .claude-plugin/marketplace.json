@@ -75,7 +75,7 @@
     },
     {
       "name": "supabase-guard",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "Supabase-őr: megállítja a nem az aktuális mappa projektjére menő Supabase-hívásokat (MCP és CLI), romboló SQL, branch-reset és projekt-szüneteltetés előtt egygombos felugróban rákérdez; más projekt olvasásakor figyelmezteti a modellt. /supaor be|ki. Magyar/angol.",
       "author": {
         "name": "Szota Szabolcs",
