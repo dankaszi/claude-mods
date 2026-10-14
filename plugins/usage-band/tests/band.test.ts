@@ -141,3 +141,28 @@ test('89,6% már 90%-nak látszik, és ⚠-t is kap', HU, async ($, on) => {
   expect(s.last()).toContain('90% ⚠')
   expect(s.toasts.length).toBe(1)
 })
+
+for (const [id, expected] of [
+  // ismert Windows-zóna: IANA névre fordítva, így a téli időszámítást is helyesen kezeli
+  ['Central Europe Standard Time', '→ 16:20'],
+  // ismeretlen zóna: a PowerShell által adott eltérés
+  ['Some Other Standard Time', '→ 19:50'],
+] as const) {
+  test(`Windowson a PowerShellből veszi az időzónát (${id})`, HU, async ($, on) => {
+    const s = engine(on)
+    const ran: string[] = []
+    on('process.run', ($, e) => {
+      ran.push(e.argv[0] ?? '')
+      const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+      if (e.argv[0] === 'powershell') return out(`${id}\r\n+05:30\r\n`)
+      // readlink és date nincs Windowson
+      return { deny: 'spawn ENOENT' } as never
+    })
+    on('session.start', ($, e) => e as never)
+    on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1 }, rateLimits: [] } }))
+    await $.session.start({ cwd: 'C:\\x', surface: 'terminal', isInteractive: true } as never)
+    await $.session.measure({ context: {} as never, rateLimits: [{ kind: 'five_hour', percentUsed: 10, resetsAt: '2026-10-05T14:20:00Z' }], changed: ['rateLimits'] })
+    expect(s.last()).toContain(expected)
+    expect(ran).toContain('powershell')
+  })
+}

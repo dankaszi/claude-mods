@@ -35,7 +35,7 @@ A státuszsorba (a prompt alá) írja:
 - kontextusablak telítettsége
 - 5 órás és heti rate-limit, reset időponttal (csak Pro/Max előfizetéssel)
 - ⚠ 90% felett, és egy toast, amikor egy limit átlépi (ablakonként, resetenként egyszer; ha visszaesik alá, újra szólhat)
-- a reset időpont a gép időzónájában (a `TZ`, a `/etc/localtime` vagy a `date +%z` alapján; a mod környezete egyébként UTC-ben futna)
+- a reset időpont a gép időzónájában (a `TZ`, a `/etc/localtime`, a `date +%z`, Windowson a PowerShell alapján; a mod környezete egyébként UTC-ben futna)
 - `/limitsav` kapcsolja, `/limitsav be|ki` beállítja; az eszköztárban (`/eszkozok`) is kapcsolható
 
 **Nyelv / Language:** `/config` → `usage-band.language`, vagy a `settings.json`-ban:
@@ -202,7 +202,7 @@ Push-őr: nyilvános GitHub-repóba push előtt (és `gh repo edit --visibility 
 - A távoli repón még nem lévő commitokat nézi (üzenet + hozzáadott sorok); első pushnál és nyilvánossá tételnél a teljes history gyanús sorait. Ha az túl nagy, a mostani fájlokat nézi, és szól, hogy a régebbi commitok átnézetlenek.
 - Felismeri: `git push origin forrás:cél`, több refspec, `--all`/`--mirror`/`--tags`, `git push 2>&1 | tail`, láncolt parancsok (`&&`, `;`), `git -C <mappa>`, `--repo`; a sima `git push` a git saját távoli-választását követi (`pushRemote`, `pushDefault`, upstream).
 - Ha a git elhasal vagy a kimenete csonkolódik, a push nem megy ki (zárva marad).
-- Keres: Supabase projekt-ID (URL, `project_id`, táblázatsor), JWT / Supabase-kulcs, Stripe/Anthropic/OpenAI/GitHub/AWS/Google/Slack/Resend/Telegram/ElevenLabs kulcsok, privát kulcs, e-mail-cím (a saját git e-mail és a noreply/példa címek kivételével), helyi `/Users/<te>/` útvonal, privát repóid nevei (`gh repo list --visibility private`), `.env` fájlok, és amit `/pushor figyel <szöveg>`-gel felvettél.
+- Keres: Supabase projekt-ID (URL, `project_id`, táblázatsor), JWT / Supabase-kulcs, Stripe/Anthropic/OpenAI/GitHub/AWS/Google/Slack/Resend/Telegram/ElevenLabs kulcsok, privát kulcs, e-mail-cím (a saját git e-mail és a noreply/példa címek kivételével), helyi `/Users/<te>/` útvonal, Windows-os felhasználói mappa (`C:\Users\<név>`, `C:/Users/…`, `/c/Users/…`; a `%USERNAME%`-féle helyőrzők nem számítanak), privát repóid nevei (`gh repo list --visibility private`), `.env` fájlok, és amit `/pushor figyel <szöveg>`-gel felvettél.
 - Találatnál felugró, maszkolt listával — **Megtiltom / Pushold így is / Pushold, jegyezd meg** (az utóbbi az adott repóra kivételként megjegyzi a találatokat). Tiltáskor a modell megkapja a teljes listát a javításhoz.
 - Privát repóba menő pushnál nem csinál semmit. Kell hozzá a `gh` CLI (bejelentkezve). `/pushor be|ki`.
 
