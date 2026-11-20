@@ -17,6 +17,7 @@ claude plugin install snake-pane@claude-mods
 claude plugin install supabase-guard@claude-mods
 claude plugin install public-repo-guard@claude-mods
 claude plugin install decision-popup@claude-mods
+claude plugin install flask-tools@claude-mods
 ```
 
 Frissítés: `claude plugin update usage-band@claude-mods`, majd `/reload-plugins` (vagy új session).
@@ -213,6 +214,25 @@ Döntési felugró: a döntések egygombos kérdésként jönnek.
 - A rendszerpromptban arra kéri Claude-ot, hogy minden döntést (engedélyezés, A vagy B, visszafordíthatatlan vagy kifelé ható lépés) az AskUserQuestion dialógussal kérdezzen meg, 2–4 rövid opcióval, a javasoltat vagy a biztonságosabbat elöl — egy számgombbal válaszolsz.
 - A dialógus keretet és címet kap („Döntés kell”); az őr-modok (supabase-guard, public-repo-guard) kérdése piros keretben, „Az őr megállított egy műveletet” címmel. A piros keretet csak az őr-mod saját, éppen feltett kérdése kapja: a modell egy hasonló fejlécű kérdéssel nem kölcsönözheti az őr tekintélyét.
 - `/dontes be|ki`, vagy az eszköztárban.
+
+### flask-tools
+
+Két skill kis Flask-appokhoz (és a mellettük lévő PowerShell scriptekhez). Nem mod, hanem skill: nincs sáv vagy panel, Claude akkor használja, ha kéred („nézd át”, „teszteld az appot”), vagy a nevükkel: `/flask-tools:flask-review`, `/flask-tools:flask-qa`. Telepítés nélkül fut Windowson is: csak a projekt saját Pythonja kell.
+
+**flask-review** – egy változás átnézése commit előtt:
+- a nem commitolt módosításokat, a feature-branchet, vagy `main`-en az utolsó commitot nézi (nem áll le, ha `main`-en dolgozol);
+- csak olyat jelez, amire kódsort tud idézni, 1–10-es megbízhatósággal;
+- Flask-specifikus pontok: SQL összefűzve, hiányzó `@login_required`, CSRF, törlés GET-re, `|safe`/`Markup`, beégetett `SECRET_KEY` és jelszó, `debug=True`, feltöltések, pénz és készlet `float`-tal, tranzakciók, migrációk;
+- PowerShell-pontok: `Invoke-Expression`, jelszó a scriptben, `-ExecutionPolicy Bypass`, `-WhatIf` nélküli törlés, `C:\Users\<név>` útvonal;
+- a mechanikus hibát kijavítja, a többit egy kérdésben összegyűjti; soha nem commitol.
+
+**flask-qa** – az app végigpróbálása:
+- az adatbázisról másolatot készít egy ideiglenes mappába, és csak azon dolgozik; a végén SHA-256-tal igazolja, hogy az éles fájl nem változott (ha ezt nem tudja garantálni, megáll és kérdez);
+- teszt-felhasználót hoz létre a másolatban, a saját jelszavadat nem kéri;
+- a Flask tesztkliensével minden oldalt lekér, és minden űrlapot háromféleképp kitölt (jó, üres, hibás adattal: negatív és óriási mennyiség, szöveg számmezőben, ékezetek, duplikált cikkszám, más felhasználó rekordja);
+- raktárlogika: negatív készlet, mozgás nélküli készletváltozás, el nem jövő összesítők;
+- a hibákat lépésről lépésre reprodukálhatóan írja le; javítást és `pytest` regressziós tesztet csak jóváhagyás után ír, és nem commitol;
+- böngészős kör csak kérésre és csak akkor, ha van böngésző-eszköz.
 
 ## Ötletek
 

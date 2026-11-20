@@ -1,0 +1,8 @@
+{
+  "name": "flask-tools",
+  "version": "0.1.0",
+  "description": "Two skills for small Flask apps (and PowerShell scripts): flask-review checks a change for Flask security and correctness issues, flask-qa exercises every route and form against a throwaway copy of the database. Built for Windows, no extra installs.",
+  "author": {
+    "name": "Dankai László"
+  }
+}

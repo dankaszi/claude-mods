@@ -105,6 +105,16 @@
       },
       "source": "./plugins/decision-popup",
       "category": "productivity"
+    },
+    {
+      "name": "flask-tools",
+      "version": "0.1.0",
+      "description": "Két skill kis Flask-appokhoz (és PowerShell scriptekhez): a flask-review hibát és biztonsági rést keres egy változásban, minden találathoz idézi a kódsort; a flask-qa minden oldalt és űrlapot végigpróbál az adatbázis egy eldobható másolatán, és lépésről lépésre leírja a hibákat. Nem commitol, az éles adatbázishoz nem nyúl.",
+      "author": {
+        "name": "Dankai László"
+      },
+      "source": "./plugins/flask-tools",
+      "category": "development"
     }
   ]
 }
