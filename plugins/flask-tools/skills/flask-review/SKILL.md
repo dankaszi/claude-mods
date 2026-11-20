@@ -5,7 +5,7 @@ description: Review a change in a Flask app (and any PowerShell scripts in the r
 
 # Flask review
 
-Review one change in a Flask app. Report only problems you can point to in the code; fix the obvious ones, ask about the rest. Never commit, push or open a PR. Answer in the user's language.
+Review one change in a Flask app. Report only problems you can point to in the code; fix the obvious ones, ask about the rest. Never commit, push or open a PR. Answer in the language the user wrote the request in (not the language of the code).
 
 ## 1. Pick what to review
 
@@ -13,8 +13,8 @@ Use the first that is non-empty, and say which one you picked:
 
 1. Anything the user named (files, a commit, a range).
 2. Uncommitted work: `git diff HEAD` plus untracked files from `git status --porcelain`.
-3. A feature branch: `git diff $(git merge-base origin/main HEAD)` (or `master`).
-4. On the main branch with a clean tree: the last commit, `git show HEAD`. Offer a wider range ("the last 5 commits?") instead of stopping.
+3. A feature branch: `git diff $(git merge-base origin/main HEAD)` (`master` if that is the default; the local `main`/`master` if there is no remote).
+4. On the default branch (`main` or `master`) with a clean tree: the last commit, `git show HEAD`. Offer a wider range ("the last 5 commits?") instead of stopping. If HEAD is the only commit, review the whole tree and say so.
 
 Read the whole diff first, then open the surrounding code of each changed function: a bug is often in what the diff calls, not in the diff itself.
 
@@ -25,12 +25,14 @@ Learn the app before judging it: how it starts (`create_app()` or a module-level
 **Critical** (data loss, security hole, wrong numbers):
 
 - **SQL built from strings**: f-strings, `%` or `+` in `execute(...)`, `text(...)` or `.filter(text(...))`. Fix: parameters (`execute("... WHERE id = ?", (id,))`, `text("... :id")`).
-- **Missing login check**: a new or changed route that reads or writes data without `@login_required` (or the app's own check), or one that loads a record by id without checking it belongs to the current user.
+- **Missing login check**: a new or changed route that reads or writes data without `@login_required` (or the app's own check). Where records have an owner (per user or per site), also a route that loads one by id without checking it belongs to the current user.
+- **Passwords** stored or compared in plain text instead of `werkzeug.security.generate_password_hash` / `check_password_hash`.
 - **CSRF**: a POST form without a CSRF token. With Flask-WTF: `{{ form.hidden_tag() }}` or `{{ csrf_token() }}` in the template and `CSRFProtect(app)`. Without it: say the app has no CSRF protection at all, once.
 - **State change on GET**: a route that deletes or edits on GET (links, `?delete=1`).
 - **XSS**: `|safe`, `Markup(...)`, `render_template_string` with user data, or `autoescape false`.
 - **Secrets and config**: a hard-coded `SECRET_KEY`, passwords, API keys, tokens or connection strings in code; `debug=True` or `FLASK_DEBUG=1` that would reach a non-local run; `app.run(host="0.0.0.0")` without a reason.
 - **Uploads and paths**: user-supplied file names without `secure_filename`, or `send_file`/`open` built from user input (path traversal).
+- **Input that is trusted as is**: a quantity or price whose sign and range are not checked (a negative "stock out" adds stock), `int()`/`float()`/`Decimal()` on form input without handling the error (a 500 instead of a message).
 - **Money and stock maths**: `float` for money or quantities that must add up (use `Decimal` or integer units), rounding in the wrong place, a stock change that is not in the same transaction as the record it belongs to, a read-modify-write on a quantity without a lock or an atomic `UPDATE ... SET qty = qty - ?`.
 - **Transactions**: `commit()` missing after a write, or a write split over several commits so a failure leaves half a change; a broad `except:` that swallows a failed commit without `rollback()`.
 - **Migrations**: a model change with no migration, a migration that drops or renames a column holding data, or a `downgrade()` that cannot undo its `upgrade()`.
@@ -42,6 +44,7 @@ Learn the app before judging it: how it starts (`create_app()` or a module-level
 - A new value (status, category, unit) not handled in every `if/elif` or template branch that lists the others: search the code for the sibling values.
 - Error paths: what the user sees on a missing record (`get_or_404`), an invalid form, a failed commit.
 - Dead code, a duplicated helper, names that no longer say what the code does.
+- Files that should not be in git: the database file, `.env`, `.venv`/`venv`, `instance/` data. Suggest `.gitignore` lines; removing them from history is the user's call.
 
 **PowerShell scripts** (`*.ps1`, `*.psm1`) in the change:
 
@@ -56,7 +59,7 @@ Learn the app before judging it: how it starts (`create_app()` or a module-level
 
 For every finding:
 
-- Quote the line (`path:line` and the code). No quote, no finding.
+- Quote the line (`path:line` and the code). No quote, no finding. When the line holds a secret, redact the value (`SECRET_KEY="dev-…"`).
 - Give a confidence from 1 to 10. 9-10: you traced the input to the problem. 7-8: very likely, one assumption left. 5-6: plausible, say what would confirm it. Below 5: leave it out.
 - Say in one line what goes wrong for a real user, and in one line what fixes it.
 
@@ -64,11 +67,11 @@ Do not report style preferences, things the diff already fixes, or problems in c
 
 ## 4. Fix first, then ask
 
-- **Fix directly** what is mechanical and has one right answer: a parameterised query, a missing `commit()`/`rollback()`, `get` to `get_or_404`, a missing `secure_filename`, a hard-coded path that has an obvious config value. Show each fix as a short diff.
+- **Fix directly** what is mechanical and has one right answer: a parameterised query, escaping user data that is rendered with `|safe`/`Markup`, a missing `commit()`/`rollback()`, `get` to `get_or_404` (or `abort(404)` on a missing row), a missing `secure_filename`, a hard-coded path that has an obvious config value. Show each fix as a short diff.
 - **Ask** (one batched question, not one per item) before anything that changes behaviour or needs a decision: adding auth to a route, money types, transactions, migrations, deleting code, new dependencies (Flask-WTF, Flask-Limiter).
 - **Never** run a migration against the real database, change `.env` files, rotate or print secrets, or commit.
 
-After fixing, run the app's own checks if they exist (`pytest`, `python -m pytest`, `flake8`/`ruff`), and say plainly whether they passed, failed, or there were none.
+After fixing, run the app's own checks if they exist (`pytest`, `python -m pytest`, `flake8`/`ruff`), and say plainly whether they passed, failed, or there were none. With no tests, smoke-test each fixed route with `app.test_client()` against a copy of the database in a temporary folder (never the real file), and say what you checked.
 
 ## 5. Report
 
