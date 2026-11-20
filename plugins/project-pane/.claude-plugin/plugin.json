@@ -1,6 +1,6 @@
 {
   "name": "project-pane",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Side pane for the current repo: git state with a one-press GitHub sync, Netlify deploys, PRs and CI, Supabase project. Hungarian or English.",
   "author": {
     "name": "Szota Szabolcs",
@@ -23,7 +23,7 @@
     "autoOpen": {
       "type": "boolean",
       "title": "Open by itself",
-      "description": "Open the pane when a session starts in a git repository (it seats once the terminal is at least 144 columns wide). /project always opens it.",
+      "description": "Open the pane when a session starts in a git repository (it seats once the terminal is at least 144 columns wide). /projekt always opens it.",
       "required": false,
       "default": true
     }

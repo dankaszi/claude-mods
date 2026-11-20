@@ -70,8 +70,8 @@ function engine(on: On, fixture: Fixture, waitReason?: string) {
 
 async function start($: Engine) {
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
-  // a session.start a frissítést háttérben indítja: a /project parancs megvárható útja ugyanaz
-  await $.command.run({ command: 'project', args: '' } as never)
+  // a session.start a frissítést háttérben indítja: a /projekt parancs megvárható útja ugyanaz
+  await $.command.run({ command: 'projekt', args: '' } as never)
 }
 
 const PANE = { component: 'Pane', requestId: 'project', props: {} as never } as const
@@ -171,20 +171,20 @@ test('keskeny terminál: szól, hogy a panel vár', HU, async ($, on) => {
   const { toasts } = engine(on, STALE, '120 oszlop < 144')
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   for (let i = 0; i < 20 && toasts.length === 0; i++) await Promise.resolve()
-  expect(toasts.some(x => x.includes('120 oszlop < 144') && x.includes('/project'))).toBe(true)
+  expect(toasts.some(x => x.includes('120 oszlop < 144') && x.includes('/projekt'))).toBe(true)
 })
 
-test('/project ki: bezárja a panelt és nem frissít; /project be: újra nyitja', HU, async ($, on) => {
+test('/projekt ki: bezárja a panelt és nem frissít; /projekt be: újra nyitja', HU, async ($, on) => {
   const s = engine(on, STALE)
   const closed: string[] = []
   on('ui.close', ($, e) => { closed.push(e.id); return { value: undefined } as never })
   await start($)
-  expect((await $.command.run({ command: 'project', args: 'ki' } as never)).text).toContain('kikapcsolva')
+  expect((await $.command.run({ command: 'projekt', args: 'ki' } as never)).text).toContain('kikapcsolva')
   expect(closed).toEqual(['project'])
   const before = s.ran.length
-  await $.command.run({ command: 'project', args: 'valami' } as never)
+  await $.command.run({ command: 'projekt', args: 'valami' } as never)
   expect(s.ran.length).toBe(before)
-  expect((await $.command.run({ command: 'project', args: 'be' } as never)).text).toBe('Projekt-panel megnyitva.')
+  expect((await $.command.run({ command: 'projekt', args: 'be' } as never)).text).toBe('Projekt-panel megnyitva.')
 })
 
 test('leválasztott HEAD: nincs szinkron gomb, nem vált el a commitoktól', HU, async ($, on) => {

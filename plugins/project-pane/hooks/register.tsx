@@ -239,7 +239,7 @@ async function sync($: EngineInterface, stash: boolean): Promise<void> {
   }
 }
 
-// Be/ki kapcsolás: a /project parancs és az eszköztár (tool-hub) gombja is ezt hívja.
+// Be/ki kapcsolás: a /projekt parancs és az eszköztár (tool-hub) gombja is ezt hívja.
 async function setOn($: EngineInterface, wanted: boolean): Promise<string> {
   await update($, isOn, () => wanted)
   await $.store.set('isOn', wanted)
@@ -270,7 +270,7 @@ export const register: Register = (on, options) => {
     const saved = (await $.store.get('isOn')) !== false
     await update($, isOn, () => saved)
     await $.command.register({
-      name: 'project',
+      name: 'projekt',
       description: t.commandDescription,
       argumentHint: t === STRINGS.hu ? '[be|ki]' : '[on|off]',
       immediate: true,
@@ -289,7 +289,7 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('command.run', { command: 'project' }, async ($, e) => {
+  on('command.run', { command: 'projekt' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     if (arg !== '' && !['be', 'on', 'ki', 'off'].includes(arg)) return { text: t.usage }
     return { text: await setOn($, !['ki', 'off'].includes(arg)) }

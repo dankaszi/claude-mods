@@ -71,7 +71,7 @@ Beállítás (`/config`): `usage-header.language` (`auto`/`hu`/`en`).
 
 ### project-pane
 
-Oldalpanel az aktuális git repóhoz. Magától megnyílik, ha a session git repóban indul és a terminál legalább 144 oszlop széles (miután egyszer `/project`-tel megnyitottad, 110 is elég); keskenyebb ablaknál egy toast szól, hogy vár. Bármikor: `/project`.
+Oldalpanel az aktuális git repóhoz. Magától megnyílik, ha a session git repóban indul és a terminál legalább 144 oszlop széles (miután egyszer `/projekt`-tel megnyitottad, 110 is elég); keskenyebb ablaknál egy toast szól, hogy vár. Bármikor: `/projekt`. (A `/project` név a Claude Code saját parancsa, ezért a mod `/projekt`-ként regisztrál.)
 
 ```
 acme/shop                          ↻ most [ Frissítés ]
@@ -150,7 +150,7 @@ Eszköztár: egy helyről kapcsolhatók a fenti modok. A prompt alatti lábléc 
 - Modonként BE/KI állapot és kapcsoló gomb, `ctrl+x tab` után az `1`–`8` számbillentyűvel is.
 - Ami nincs telepítve, „nincs betöltve” felirattal jelenik meg.
 - Bekapcsolt fókusz módnál a lábléc is kiírja: „Fókusz mód”.
-- Parancsból is ugyanez: `/fokusz`, `/limitsav`, `/hasznalat`, `/project`, `/jatek`, `/supaor`, `/pushor`, `/dontes` (mind `be|ki` argumentummal).
+- Parancsból is ugyanez: `/fokusz`, `/limitsav`, `/hasznalat`, `/projekt`, `/jatek`, `/supaor`, `/pushor`, `/dontes` (mind `be|ki` argumentummal).
 - A sávot megosztja a fókusz mód listájával (a kapcsolók alatta jelennek meg).
 
 Új mod felvétele az eszköztárba: a mod írja a saját `isOn` állapotát, adjon `/<parancs> be|ki`-t, és hookolja a `state.set`-et `{ plugin: 'tool-hub', key: 'request' }`-re; a hubban egy sor a `TOOLS` listába, egy ág a `stateOf`-ba és a kulcs a `types/index.d.ts`-be.
