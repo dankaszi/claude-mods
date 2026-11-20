@@ -41,7 +41,7 @@ const TOOLS = [
   },
   {
     id: 'project',
-    command: 'project',
+    command: 'projekt',
     label: { hu: 'Projektpanel', en: 'Project pane' },
     detail: {
       hu: 'GitHub, CI, Netlify és Supabase állapot oldalt',

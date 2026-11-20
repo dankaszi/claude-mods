@@ -1,6 +1,6 @@
 {
   "name": "tool-hub",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Toolbox: a button at the bottom right of the prompt footer (or /eszkozok) opens switches above the prompt for Szabolcs's mods (focus mode, usage bar, project pane, snake game, Supabase guard, push guard, decision popup, ...). Hungarian or English.",
   "types": "./types/index.d.ts",
   "author": {
